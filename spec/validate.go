@@ -5,6 +5,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/docker/go-units"
 )
@@ -116,8 +117,14 @@ func ValidateCredentialPolicy(c *CredentialPolicy) error {
 	}
 
 	for service, source := range c.Sources {
-		if len(source.Env) == 0 && source.File == nil {
-			return fmt.Errorf("credentials: sources[%q] must have at least one of env or file", service)
+		hostCmd := strings.TrimSpace(source.HostCommand)
+
+		if source.HostCommand != "" && hostCmd == "" {
+			return fmt.Errorf("credentials: sources[%q].hostCommand must not be blank or whitespace-only", service)
+		}
+
+		if len(source.Env) == 0 && source.File == nil && hostCmd == "" {
+			return fmt.Errorf("credentials: sources[%q] must have at least one of env, file, or hostCommand", service)
 		}
 
 		if source.File != nil {
@@ -128,6 +135,19 @@ func ValidateCredentialPolicy(c *CredentialPolicy) error {
 
 		if source.Priority != "" && source.Priority != "env-first" && source.Priority != "file-first" {
 			return fmt.Errorf("credentials: sources[%q].priority must be \"env-first\" or \"file-first\"", service)
+		}
+
+		if source.Refresh != "" {
+			if hostCmd == "" {
+				return fmt.Errorf("credentials: sources[%q].refresh requires hostCommand to be set", service)
+			}
+			ttl, err := time.ParseDuration(source.Refresh)
+			if err != nil {
+				return fmt.Errorf("credentials: sources[%q].refresh %q is not a valid duration (e.g. \"15m\", \"1h\")", service, source.Refresh)
+			}
+			if ttl <= 0 {
+				return fmt.Errorf("credentials: sources[%q].refresh must be a positive duration", service)
+			}
 		}
 	}
 

@@ -160,6 +160,21 @@ type CredentialSource struct {
 
 	// Required indicates that this credential is essential for the agent to function.
 	Required bool `json:"required,omitempty" yaml:"required,omitempty"`
+
+	// HostCommand is a shell command run on the host (via POSIX sh -c) whose
+	// trimmed stdout becomes the credential value. The command is executed at
+	// sandbox creation time (CLI), on-demand by the daemon proxy, and
+	// periodically on the Refresh cadence while `sbx run` is attached.
+	// Requires a POSIX shell on the host.
+	// At least one of Env, File, or HostCommand must be set per source.
+	HostCommand string `json:"hostCommand,omitempty" yaml:"hostCommand,omitempty"`
+
+	// Refresh is the re-fetch cadence for HostCommand credentials (e.g. "15m", "1h").
+	// Must be a positive Go duration string. When set, the sandbox runtime pushes
+	// an initial value at attach time and re-runs the command on this interval;
+	// on a failed push the next attempt is shortened to min(1m, Refresh).
+	// Requires HostCommand to be set.
+	Refresh string `json:"refresh,omitempty" yaml:"refresh,omitempty"`
 }
 
 // FileCredentialSource defines a file-based credential location on the host.

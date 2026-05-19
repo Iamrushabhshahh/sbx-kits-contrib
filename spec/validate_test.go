@@ -143,7 +143,7 @@ func TestValidateCredentialPolicy(t *testing.T) {
 				"svc": {},
 			},
 		}
-		require.ErrorContains(t, ValidateCredentialPolicy(c), "at least one of env or file")
+		require.ErrorContains(t, ValidateCredentialPolicy(c), "at least one of env, file, or hostCommand")
 	})
 
 	t.Run("invalid_priority", func(t *testing.T) {
@@ -153,6 +153,60 @@ func TestValidateCredentialPolicy(t *testing.T) {
 			},
 		}
 		require.ErrorContains(t, ValidateCredentialPolicy(c), "priority")
+	})
+
+	t.Run("hostCommand_only_is_valid", func(t *testing.T) {
+		c := &CredentialPolicy{
+			Sources: map[string]CredentialSource{
+				"svc": {HostCommand: "vault read -field=token secret/svc"},
+			},
+		}
+		require.NoError(t, ValidateCredentialPolicy(c))
+	})
+
+	t.Run("hostCommand_blank_is_rejected", func(t *testing.T) {
+		c := &CredentialPolicy{
+			Sources: map[string]CredentialSource{
+				"svc": {HostCommand: "   "},
+			},
+		}
+		require.ErrorContains(t, ValidateCredentialPolicy(c), "must not be blank")
+	})
+
+	t.Run("hostCommand_with_refresh_is_valid", func(t *testing.T) {
+		c := &CredentialPolicy{
+			Sources: map[string]CredentialSource{
+				"svc": {HostCommand: "echo token", Refresh: "15m"},
+			},
+		}
+		require.NoError(t, ValidateCredentialPolicy(c))
+	})
+
+	t.Run("refresh_without_hostCommand_is_rejected", func(t *testing.T) {
+		c := &CredentialPolicy{
+			Sources: map[string]CredentialSource{
+				"svc": {Env: []string{"KEY"}, Refresh: "15m"},
+			},
+		}
+		require.ErrorContains(t, ValidateCredentialPolicy(c), "refresh requires hostCommand")
+	})
+
+	t.Run("refresh_zero_duration_is_rejected", func(t *testing.T) {
+		c := &CredentialPolicy{
+			Sources: map[string]CredentialSource{
+				"svc": {HostCommand: "echo token", Refresh: "0s"},
+			},
+		}
+		require.ErrorContains(t, ValidateCredentialPolicy(c), "positive")
+	})
+
+	t.Run("refresh_invalid_duration_is_rejected", func(t *testing.T) {
+		c := &CredentialPolicy{
+			Sources: map[string]CredentialSource{
+				"svc": {HostCommand: "echo token", Refresh: "not-a-duration"},
+			},
+		}
+		require.ErrorContains(t, ValidateCredentialPolicy(c), "not a valid duration")
 	})
 }
 
