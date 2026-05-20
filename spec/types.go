@@ -296,6 +296,12 @@ type Artifact struct {
 	// OAuth is the optional OAuth configuration.
 	OAuth *OAuthPolicy `json:"oauth,omitempty"`
 
+	// MCPClient is the optional declarative MCP-client config for this
+	// kit. When set, the consuming engine applies the declared files
+	// and commands inside the container after the aggregate MCP
+	// gateway starts. Nil means the kit has no MCP-client hook.
+	MCPClient *MCPClientSpec `json:"mcpClient,omitempty"`
+
 	// Files are static files from the files/ directory to copy into the container.
 	Files []ArtifactFile `json:"files,omitempty"`
 
@@ -392,6 +398,7 @@ type specFile struct {
 	Settings    *SettingsPolicy    `yaml:"settings,omitempty"`
 	Commands    *CommandsPolicy    `yaml:"commands,omitempty"`
 	OAuth       *OAuthPolicy       `yaml:"oauth,omitempty"`
+	MCPClient   *MCPClientSpec     `yaml:"mcpClient,omitempty"`
 	Memory      string             `yaml:"memory,omitempty"`
 }
 

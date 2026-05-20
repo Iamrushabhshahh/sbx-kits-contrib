@@ -276,6 +276,9 @@ func ValidateArtifact(a *Artifact) error {
 	if err := ValidateOAuthPolicy(a.OAuth); err != nil {
 		return err
 	}
+	if err := ValidateMCPClientSpec(a.MCPClient); err != nil {
+		return err
+	}
 
 	for i, f := range a.Files {
 		if f.Target != TargetHome && f.Target != TargetWorkspace {
@@ -313,6 +316,44 @@ func ValidateLocked(paths []string) error {
 			return fmt.Errorf("locked[%d] %q is duplicated", i, p)
 		}
 		seen[p] = struct{}{}
+	}
+	return nil
+}
+
+// ValidateMCPClientSpec checks an MCPClientSpec for the structural
+// rules the engine relies on:
+//
+//   - every file has a non-empty Path (after trimming whitespace) and a
+//     non-empty Content;
+//   - every command has a non-empty Argv with a non-empty first
+//     element;
+//   - Mode, if set, is a valid Unix permission (low 12 bits only).
+//
+// Template syntax is not parsed here — the consumer's Parse() failures
+// surface at render time. The validator only catches the kinds of
+// authoring mistakes that would silently produce empty/broken hooks.
+func ValidateMCPClientSpec(s *MCPClientSpec) error {
+	if s == nil {
+		return nil
+	}
+	for i, f := range s.Files {
+		if strings.TrimSpace(f.Path) == "" {
+			return fmt.Errorf("mcpClient: files[%d].path is required", i)
+		}
+		if f.Content == "" {
+			return fmt.Errorf("mcpClient: files[%d].content is required", i)
+		}
+		if f.Mode != 0 && (f.Mode < 0 || f.Mode > 0o7777) {
+			return fmt.Errorf("mcpClient: files[%d].mode %o is out of range (expected 0..07777)", i, f.Mode)
+		}
+	}
+	for i, c := range s.Commands {
+		if len(c.Argv) == 0 {
+			return fmt.Errorf("mcpClient: commands[%d].argv is required", i)
+		}
+		if strings.TrimSpace(c.Argv[0]) == "" {
+			return fmt.Errorf("mcpClient: commands[%d].argv[0] must not be empty", i)
+		}
 	}
 	return nil
 }

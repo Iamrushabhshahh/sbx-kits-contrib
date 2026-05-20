@@ -112,6 +112,7 @@ func parseArtifact(readFile func(string) ([]byte, error)) (*Artifact, error) {
 		Settings:    spec.Settings,
 		Commands:    spec.Commands,
 		OAuth:       spec.OAuth,
+		MCPClient:   spec.MCPClient,
 		Memory:      spec.Memory,
 	}, nil
 }
