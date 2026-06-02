@@ -421,7 +421,14 @@ func (s *Suite) RunCredentialPolicyTests(t *testing.T) {
 				require.True(t, c.ApiKey != nil || c.OAuth != nil,
 					"credential entry for %q must have at least one of apiKey or oauth", c.Service)
 
-				if c.ApiKey != nil {
+				if c.ApiKey != nil && c.ApiKey.Name != "" {
+					// "Routing-only" credentials (ApiKey.Name empty, Inject
+					// non-empty) are valid under the parallel-load normalize
+					// path: v1 kits that declared services in network.serviceAuth
+					// + network.serviceDomains without a matching
+					// credentials.sources entry produce these entries (e.g.,
+					// amp, github routing in docker-agent). Skip the name
+					// shape check when the credential is routing-only.
 					require.True(t, shellIdentifierPattern.MatchString(c.ApiKey.Name),
 						"credential apiKey.name %q for service %q is not a valid shell identifier", c.ApiKey.Name, c.Service)
 				}
