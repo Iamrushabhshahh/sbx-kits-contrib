@@ -340,39 +340,63 @@ func (s *Suite) RunValidationTests(t *testing.T) {
 }
 
 // RunNetworkPolicyTests verifies the artifact's network policy is consistent.
+//
+// Post-Phase-3 commit 7: allow/deny come from Caps.Network; service
+// domains/auth come from Credentials[].ApiKey.Inject. The Suite's
+// Expected* field names are preserved.
 func (s *Suite) RunNetworkPolicyTests(t *testing.T) {
-	if s.Artifact.Network == nil && len(s.ExpectedAllowedDomains) == 0 && len(s.ExpectedDeniedDomains) == 0 && len(s.ExpectedServiceDomains) == 0 {
+	caps := s.Artifact.Caps
+	creds := s.Artifact.Credentials
+	if caps == nil && len(creds) == 0 && len(s.ExpectedAllowedDomains) == 0 && len(s.ExpectedDeniedDomains) == 0 && len(s.ExpectedServiceDomains) == 0 {
 		return
 	}
 
+	// Build the actual service-domains / service-auth maps from
+	// Credentials[].ApiKey.Inject.
+	actualDomains := map[string]string{}
+	actualAuth := map[string]spec.ServiceAuth{}
+	for _, c := range creds {
+		if c.ApiKey == nil {
+			continue
+		}
+		for _, inj := range c.ApiKey.Inject {
+			if inj.Domain != "" {
+				actualDomains[inj.Domain] = c.Service
+			}
+		}
+		if len(c.ApiKey.Inject) > 0 {
+			if _, exists := actualAuth[c.Service]; !exists {
+				inj := c.ApiKey.Inject[0]
+				actualAuth[c.Service] = spec.ServiceAuth{HeaderName: inj.Header, ValueFormat: inj.Format}
+			}
+		}
+	}
+
 	t.Run("network_policy", func(t *testing.T) {
-		net := s.Artifact.Network
-		if net == nil {
-			require.Empty(t, s.ExpectedAllowedDomains, "expected allowed domains but network policy is nil")
-			require.Empty(t, s.ExpectedDeniedDomains, "expected denied domains but network policy is nil")
-			require.Empty(t, s.ExpectedServiceDomains, "expected service domains but network policy is nil")
-			return
+		var actualAllow, actualDeny []string
+		if caps != nil && caps.Network != nil {
+			actualAllow = caps.Network.Allow
+			actualDeny = caps.Network.Deny
 		}
 
 		if len(s.ExpectedAllowedDomains) > 0 {
-			require.ElementsMatch(t, s.ExpectedAllowedDomains, net.AllowedDomains,
+			require.ElementsMatch(t, s.ExpectedAllowedDomains, actualAllow,
 				"allowed domains should match")
 		}
 
 		if len(s.ExpectedDeniedDomains) > 0 {
-			require.ElementsMatch(t, s.ExpectedDeniedDomains, net.DeniedDomains,
+			require.ElementsMatch(t, s.ExpectedDeniedDomains, actualDeny,
 				"denied domains should match")
 		}
 
 		if len(s.ExpectedServiceDomains) > 0 {
-			require.Equal(t, s.ExpectedServiceDomains, net.ServiceDomains,
+			require.Equal(t, s.ExpectedServiceDomains, actualDomains,
 				"service domains should match")
 		}
 
 		if len(s.ExpectedServiceAuth) > 0 {
-			require.NotNil(t, net.ServiceAuth)
 			for service, expected := range s.ExpectedServiceAuth {
-				actual, ok := net.ServiceAuth[service]
+				actual, ok := actualAuth[service]
 				require.True(t, ok, "service auth for %q not found", service)
 				require.Equal(t, expected.HeaderName, actual.HeaderName,
 					"headerName mismatch for service %q", service)

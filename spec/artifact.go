@@ -125,19 +125,15 @@ func parseArtifactBytes(data []byte) (*Artifact, error) {
 		return nil, fmt.Errorf("artifact: %w", err)
 	}
 
-	// Build the canonical Artifact.Network from LegacyNetwork's canonical
-	// fields (AllowedDomains, DeniedDomains, PublishedPorts). The
-	// serviceDomains/serviceAuth fields are deliberately not copied —
-	// normalizeLegacyCredentials already folded them into Credentials.
+	// Build the canonical Artifact.Network from LegacyNetwork's
+	// PublishedPorts (the only NetworkPolicy field that survives as a
+	// canonical concern post-Phase-3 commit 7). AllowedDomains and
+	// DeniedDomains moved to Caps.Network; ServiceDomains and
+	// ServiceAuth moved to Credentials[].ApiKey.Inject.
 	var network *NetworkPolicy
-	if spec.LegacyNetwork != nil {
-		ln := spec.LegacyNetwork
-		if len(ln.AllowedDomains) > 0 || len(ln.DeniedDomains) > 0 || len(ln.PublishedPorts) > 0 {
-			network = &NetworkPolicy{
-				AllowedDomains: ln.AllowedDomains,
-				DeniedDomains:  ln.DeniedDomains,
-				PublishedPorts: ln.PublishedPorts,
-			}
+	if spec.LegacyNetwork != nil && len(spec.LegacyNetwork.PublishedPorts) > 0 {
+		network = &NetworkPolicy{
+			PublishedPorts: spec.LegacyNetwork.PublishedPorts,
 		}
 	}
 

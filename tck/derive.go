@@ -44,12 +44,39 @@ func NewSuiteFromDir(dir string, opts ...Option) (*Suite, error) {
 		ExpectedTmpfs:          deriveTmpfs(artifact.Manifest.TmpfsVolumes()),
 	}
 
-	// Derive network expectations
-	if artifact.Network != nil {
-		suite.ExpectedAllowedDomains = artifact.Network.AllowedDomains
-		suite.ExpectedDeniedDomains = artifact.Network.DeniedDomains
-		suite.ExpectedServiceDomains = artifact.Network.ServiceDomains
-		suite.ExpectedServiceAuth = artifact.Network.ServiceAuth
+	// Derive network expectations. Post-Phase-3 commit 7: allow/deny
+	// derive from Caps.Network; serviceDomains/serviceAuth derive from
+	// Credentials[].ApiKey.Inject. The Suite's expected-field names are
+	// preserved for backward compatibility with existing TCK tests.
+	if artifact.Caps != nil && artifact.Caps.Network != nil {
+		suite.ExpectedAllowedDomains = artifact.Caps.Network.Allow
+		suite.ExpectedDeniedDomains = artifact.Caps.Network.Deny
+	}
+	if len(artifact.Credentials) > 0 {
+		domains := map[string]string{}
+		auth := map[string]spec.ServiceAuth{}
+		for _, c := range artifact.Credentials {
+			if c.ApiKey == nil {
+				continue
+			}
+			for _, inj := range c.ApiKey.Inject {
+				if inj.Domain != "" {
+					domains[inj.Domain] = c.Service
+				}
+			}
+			if len(c.ApiKey.Inject) > 0 {
+				if _, exists := auth[c.Service]; !exists {
+					inj := c.ApiKey.Inject[0]
+					auth[c.Service] = spec.ServiceAuth{HeaderName: inj.Header, ValueFormat: inj.Format}
+				}
+			}
+		}
+		if len(domains) > 0 {
+			suite.ExpectedServiceDomains = domains
+		}
+		if len(auth) > 0 {
+			suite.ExpectedServiceAuth = auth
+		}
 	}
 
 	// Apply functional options (e.g., WithImage)
