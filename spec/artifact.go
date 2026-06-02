@@ -125,16 +125,32 @@ func parseArtifactBytes(data []byte) (*Artifact, error) {
 		return nil, fmt.Errorf("artifact: %w", err)
 	}
 
+	// Build the canonical Artifact.Network from LegacyNetwork's canonical
+	// fields (AllowedDomains, DeniedDomains, PublishedPorts). The
+	// serviceDomains/serviceAuth fields are deliberately not copied —
+	// normalizeLegacyCredentials already folded them into Credentials.
+	var network *NetworkPolicy
+	if spec.LegacyNetwork != nil {
+		ln := spec.LegacyNetwork
+		if len(ln.AllowedDomains) > 0 || len(ln.DeniedDomains) > 0 || len(ln.PublishedPorts) > 0 {
+			network = &NetworkPolicy{
+				AllowedDomains: ln.AllowedDomains,
+				DeniedDomains:  ln.DeniedDomains,
+				PublishedPorts: ln.PublishedPorts,
+			}
+		}
+	}
+
 	return &Artifact{
 		Manifest:     spec.Manifest,
 		Extends:      spec.Extends,
 		Locked:       spec.Locked,
-		Network:      spec.Network,
-		Credentials:  spec.Credentials,
+		Network:      network,
+		Caps:         spec.Caps,
+		Credentials:  spec.Credentials.List,
 		Environment:  spec.Environment,
 		Settings:     spec.Settings,
 		Commands:     spec.Commands,
-		OAuth:        spec.OAuth,
 		AgentContext: spec.AgentContext,
 		Warnings:     w.messages,
 	}, nil

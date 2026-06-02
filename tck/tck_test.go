@@ -222,7 +222,7 @@ func TestRunOAuthPolicyTests(t *testing.T) {
 	require.NoError(t, err)
 	suite.RunOAuthPolicyTests(t)
 
-	// Test with an artifact that has OAuth
+	// Test with an artifact that has OAuth under a v2 credentials[] entry.
 	suite2 := &Suite{
 		Artifact: &spec.Artifact{
 			Manifest: spec.Manifest{
@@ -230,11 +230,13 @@ func TestRunOAuthPolicyTests(t *testing.T) {
 				Kind:          spec.KindMixin,
 				Name:          "oauth-test",
 			},
-			OAuth: &spec.OAuthPolicy{
-				Service:       "test-svc",
-				TokenEndpoint: spec.OAuthTokenEndpoint{Host: "auth.example.com", Path: "/token"},
-				Sentinels:     spec.OAuthSentinels{AccessToken: "at", RefreshToken: "rt"},
-			},
+			Credentials: []spec.Credential{{
+				Service: "test-svc",
+				OAuth: &spec.OAuth{
+					TokenEndpoint: spec.OAuthTokenEndpoint{Host: "auth.example.com", Path: "/token"},
+					Sentinels:     spec.OAuthSentinels{AccessToken: "at", RefreshToken: "rt"},
+				},
+			}},
 		},
 	}
 	suite2.RunOAuthPolicyTests(t)

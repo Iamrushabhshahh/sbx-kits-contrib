@@ -392,24 +392,14 @@ func (s *Suite) RunCredentialPolicyTests(t *testing.T) {
 	}
 
 	t.Run("credential_policy", func(t *testing.T) {
-		for service, source := range s.Artifact.Credentials.Sources {
-			t.Run(service, func(t *testing.T) {
-				require.True(t, len(source.Env) > 0 || source.File != nil,
-					"credential source for %q must have at least one of env or file", service)
+		for _, c := range s.Artifact.Credentials {
+			t.Run(c.Service, func(t *testing.T) {
+				require.True(t, c.ApiKey != nil || c.OAuth != nil,
+					"credential entry for %q must have at least one of apiKey or oauth", c.Service)
 
-				for i, envVar := range source.Env {
-					require.True(t, shellIdentifierPattern.MatchString(envVar),
-						"credential env[%d] %q for service %q is not a valid shell identifier", i, envVar, service)
-				}
-
-				if source.File != nil {
-					require.NotEmpty(t, source.File.Path,
-						"credential file path for %q must not be empty", service)
-				}
-
-				if source.Priority != "" {
-					require.Contains(t, []string{"env-first", "file-first"}, source.Priority,
-						"invalid priority %q for service %q", source.Priority, service)
+				if c.ApiKey != nil {
+					require.True(t, shellIdentifierPattern.MatchString(c.ApiKey.Name),
+						"credential apiKey.name %q for service %q is not a valid shell identifier", c.ApiKey.Name, c.Service)
 				}
 			})
 		}
@@ -434,14 +424,11 @@ func (s *Suite) RunEnvironmentPolicyTests(t *testing.T) {
 			})
 		}
 
-		if len(env.ProxyManaged) > 0 {
-			t.Run("proxy_managed", func(t *testing.T) {
-				for _, key := range env.ProxyManaged {
-					require.True(t, shellIdentifierPattern.MatchString(key),
-						"proxyManaged entry %q is not a valid shell identifier", key)
-				}
-			})
-		}
+		// Note: post-Phase-3 commit 5, environment.proxyManaged is the
+		// v1-only LegacyProxyManaged shim. The canonical place to enumerate
+		// proxy-managed env-var names is Credentials[].ApiKey.Name, which
+		// is validated by RunCredentialPolicyTests above. The shim is
+		// validated by ValidateEnvironmentPolicy at load time.
 	})
 }
 
@@ -486,34 +473,39 @@ func (s *Suite) RunSettingsPolicyTests(t *testing.T) {
 	})
 }
 
-// RunOAuthPolicyTests verifies the OAuth policy is well-formed.
+// RunOAuthPolicyTests verifies the OAuth policy is well-formed for every
+// credential that declares an oauth: sub-block. Post-Phase-3 commit 5,
+// OAuth lives under Credential.OAuth (per-credential); the standalone
+// top-level oauth: block is the v1 LegacyOAuth shim handled at load time.
 func (s *Suite) RunOAuthPolicyTests(t *testing.T) {
-	if s.Artifact.OAuth == nil {
-		return
-	}
-
-	t.Run("oauth_policy", func(t *testing.T) {
-		oauth := s.Artifact.OAuth
-
-		require.NotEmpty(t, oauth.Service, "oauth.service is required")
-
-		t.Run("token_endpoint", func(t *testing.T) {
-			require.NotEmpty(t, oauth.TokenEndpoint.Host, "oauth.tokenEndpoint.host is required")
-			require.NotEmpty(t, oauth.TokenEndpoint.Path, "oauth.tokenEndpoint.path is required")
-		})
-
-		t.Run("sentinels", func(t *testing.T) {
-			require.NotEmpty(t, oauth.Sentinels.AccessToken, "oauth.sentinels.accessToken is required")
-			require.NotEmpty(t, oauth.Sentinels.RefreshToken, "oauth.sentinels.refreshToken is required")
-		})
-
-		if oauth.CredentialFile != nil {
-			t.Run("credential_file", func(t *testing.T) {
-				require.NotEmpty(t, oauth.CredentialFile.Path, "oauth.credentialFile.path is required")
-				require.NotEmpty(t, oauth.CredentialFile.Template, "oauth.credentialFile.template is required")
-			})
+	for _, c := range s.Artifact.Credentials {
+		if c.OAuth == nil {
+			continue
 		}
-	})
+		t.Run("oauth_policy/"+c.Service, func(t *testing.T) {
+			oauth := c.OAuth
+
+			t.Run("token_endpoint", func(t *testing.T) {
+				require.NotEmpty(t, oauth.TokenEndpoint.Host, "oauth.tokenEndpoint.host is required")
+				require.NotEmpty(t, oauth.TokenEndpoint.Path, "oauth.tokenEndpoint.path is required")
+			})
+
+			t.Run("sentinels", func(t *testing.T) {
+				require.NotEmpty(t, oauth.Sentinels.AccessToken, "oauth.sentinels.accessToken is required")
+				require.NotEmpty(t, oauth.Sentinels.RefreshToken, "oauth.sentinels.refreshToken is required")
+			})
+
+			if oauth.CredentialFile != nil {
+				t.Run("credential_file", func(t *testing.T) {
+					require.NotEmpty(t, oauth.CredentialFile.Path, "oauth.credentialFile.path is required")
+					// v2 prefers Structure; v1 Template is still accepted.
+					require.True(t,
+						oauth.CredentialFile.Template != "" || oauth.CredentialFile.Structure != nil,
+						"oauth.credentialFile must have either template (v1) or structure (v2)")
+				})
+			}
+		})
+	}
 }
 
 // startContainer creates and starts a container from the suite's image using testcontainers-go.

@@ -61,18 +61,25 @@ func TestNormalizeSecrets(t *testing.T) {
 			Secrets:  []string{"ANTHROPIC_API_KEY", "GH_TOKEN"},
 		}
 		require.NoError(t, s.normalize(&warnings{}))
-		require.NotNil(t, s.Credentials)
-		require.Contains(t, s.Credentials.Sources, "anthropic")
-		require.Contains(t, s.Credentials.Sources, "github")
-		require.True(t, s.Credentials.Sources["anthropic"].Required)
+		// After normalize, the v1 LegacySources have been folded into
+		// Credentials.List as v2 Credential entries.
+		services := map[string]Credential{}
+		for _, c := range s.Credentials.List {
+			services[c.Service] = c
+		}
+		require.Contains(t, services, "anthropic")
+		require.Contains(t, services, "github")
+		require.True(t, services["anthropic"].Required)
+		require.NotNil(t, services["anthropic"].ApiKey)
+		require.Equal(t, "ANTHROPIC_API_KEY", services["anthropic"].ApiKey.Name)
 	})
 
 	t.Run("conflict_with_existing_source", func(t *testing.T) {
 		s := specFile{
 			Manifest: Manifest{Kind: KindMixin, SchemaVersion: SchemaVersion, Name: "m"},
 			Secrets:  []string{"ANTHROPIC_API_KEY"},
-			Credentials: &CredentialPolicy{
-				Sources: map[string]CredentialSource{
+			Credentials: credentialsField{
+				LegacySources: map[string]CredentialSource{
 					"anthropic": {Env: []string{"EXISTING"}},
 				},
 			},
@@ -88,9 +95,16 @@ func TestNormalizeEgress(t *testing.T) {
 			Egress:   map[string]string{"api.anthropic.com": "anthropic"},
 		}
 		require.NoError(t, s.normalize(&warnings{}))
-		require.NotNil(t, s.Network)
-		require.Equal(t, "anthropic", s.Network.ServiceDomains["api.anthropic.com"])
-		require.Equal(t, "x-api-key", s.Network.ServiceAuth["anthropic"].HeaderName)
+		// Egress folds into LegacyNetwork.ServiceDomains+ServiceAuth (v1
+		// intermediate); normalizeLegacyCredentials then folds that into
+		// Credentials.List. Assert against the final canonical shape.
+		require.Len(t, s.Credentials.List, 1)
+		c := s.Credentials.List[0]
+		require.Equal(t, "anthropic", c.Service)
+		require.NotNil(t, c.ApiKey)
+		require.Len(t, c.ApiKey.Inject, 1)
+		require.Equal(t, "api.anthropic.com", c.ApiKey.Inject[0].Domain)
+		require.Equal(t, "x-api-key", c.ApiKey.Inject[0].Header)
 	})
 
 	t.Run("unknown_service_gets_no_default_auth", func(t *testing.T) {
@@ -99,8 +113,15 @@ func TestNormalizeEgress(t *testing.T) {
 			Egress:   map[string]string{"custom.example.com": "custom"},
 		}
 		require.NoError(t, s.normalize(&warnings{}))
-		_, hasAuth := s.Network.ServiceAuth["custom"]
-		require.False(t, hasAuth, "unknown services should not get default auth")
+		// Service "custom" has no wellKnownAuth entry, so its inject
+		// entry has no header. The Credential exists with apiKey.Inject
+		// but no Header value.
+		require.Len(t, s.Credentials.List, 1)
+		c := s.Credentials.List[0]
+		require.Equal(t, "custom", c.Service)
+		require.NotNil(t, c.ApiKey)
+		require.Len(t, c.ApiKey.Inject, 1)
+		require.Empty(t, c.ApiKey.Inject[0].Header)
 	})
 }
 

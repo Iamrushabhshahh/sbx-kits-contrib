@@ -165,7 +165,7 @@ func ValidateEnvironmentPolicy(e *EnvironmentPolicy) error {
 		}
 	}
 
-	for _, key := range e.ProxyManaged {
+	for _, key := range e.LegacyProxyManaged {
 		if key == "" {
 			return fmt.Errorf("environment: proxyManaged entry cannot be empty")
 		}
@@ -270,16 +270,10 @@ func ValidateArtifact(a *Artifact) error {
 	if err := ValidateNetworkPolicy(a.Network); err != nil {
 		return err
 	}
-	if err := ValidateCredentialPolicy(a.Credentials); err != nil {
-		return err
-	}
 	if err := ValidateEnvironmentPolicy(a.Environment); err != nil {
 		return err
 	}
 	if err := ValidateCommandsPolicy(a.Commands); err != nil {
-		return err
-	}
-	if err := ValidateOAuthPolicy(a.OAuth); err != nil {
 		return err
 	}
 

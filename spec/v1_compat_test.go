@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestV1Memory_MapsToAgentContext(t *testing.T) {
@@ -228,4 +230,300 @@ tmpfs:
 	if !strings.Contains(err.Error(), "tmpfs") {
 		t.Errorf("error should name the rejected field; got %v", err)
 	}
+}
+
+// TestV2Credentials_ListShape exercises the minimal shape — one credential
+// with apiKey only. Catches "did the new types decode?" regressions
+// without obscuring them under a wall of fields.
+func TestV2Credentials_ListShape(t *testing.T) {
+	dir := t.TempDir()
+	specYAML := `schemaVersion: "2"
+kind: sandbox
+name: creds-minimal
+sandbox:
+  image: docker/sandbox-templates:shell-docker
+credentials:
+  - service: anthropic
+    description: "Anthropic API"
+    required: true
+    apiKey:
+      name: ANTHROPIC_API_KEY
+      inject:
+        - domain: api.anthropic.com
+          header: x-api-key
+          format: "%s"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "spec.yaml"), []byte(specYAML), 0o644))
+	art, err := LoadFromDirectory(dir)
+	require.NoError(t, err)
+	require.Len(t, art.Credentials, 1)
+	c := art.Credentials[0]
+	require.Equal(t, "anthropic", c.Service)
+	require.True(t, c.Required)
+	require.NotNil(t, c.ApiKey)
+	require.Equal(t, "ANTHROPIC_API_KEY", c.ApiKey.Name)
+	require.Len(t, c.ApiKey.Inject, 1)
+	require.Equal(t, "api.anthropic.com", c.ApiKey.Inject[0].Domain)
+}
+
+// TestV2Credentials_FullShape exercises every field documented in the
+// RFC: apiKey with username (HTTP basic auth for git HTTPS), full oauth
+// shape (credentialFile.structure, responseFields, skipIfEnv,
+// passthrough+passthroughReason). Schema regressions surface here first.
+func TestV2Credentials_FullShape(t *testing.T) {
+	dir := t.TempDir()
+	specYAML := `schemaVersion: "2"
+kind: sandbox
+name: creds-full
+sandbox:
+  image: docker/sandbox-templates:shell-docker
+credentials:
+  - service: anthropic
+    description: "Anthropic API credentials"
+    required: true
+    apiKey:
+      name: ANTHROPIC_API_KEY
+      inject:
+        - domain: api.anthropic.com
+          header: x-api-key
+          format: "%s"
+    oauth:
+      tokenEndpoint:
+        host: platform.claude.com
+        path: /v1/oauth/token
+      sentinels:
+        accessToken: sk-ant-oat01-proxy-managed
+        refreshToken: sk-ant-ort01-proxy-managed
+      credentialFile:
+        path: "~/.claude/.credentials.json"
+        structure:
+          claudeAiOauth:
+            accessToken: "{{.AccessToken}}"
+            refreshToken: "{{.RefreshToken}}"
+            expiresAt: "{{.ExpiresAt}}"
+      responseFields:
+        accessToken: access_token
+        refreshToken: refresh_token
+        expiresIn: expires_in
+        scope: scope
+      skipIfEnv: [ANTHROPIC_API_KEY]
+
+  - service: github
+    description: "GitHub credential for git+API access"
+    apiKey:
+      name: GITHUB_TOKEN
+      inject:
+        - domain: api.github.com
+          header: Authorization
+          format: "Bearer %s"
+        - domain: github.com
+          header: Authorization
+          format: "%s"
+          username: x-access-token
+
+  - service: workos
+    oauth:
+      tokenEndpoint:
+        host: api.workos.com
+        path: /oauth/token
+      sentinels: {}
+      passthrough: true
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "spec.yaml"), []byte(specYAML), 0o644))
+	art, err := LoadFromDirectory(dir)
+	require.NoError(t, err)
+	require.Len(t, art.Credentials, 3)
+
+	// anthropic — apiKey + full oauth.
+	a := art.Credentials[0]
+	require.Equal(t, "anthropic", a.Service)
+	require.Equal(t, "Anthropic API credentials", a.Description)
+	require.True(t, a.Required)
+	require.NotNil(t, a.ApiKey)
+	require.Equal(t, "ANTHROPIC_API_KEY", a.ApiKey.Name)
+	require.NotNil(t, a.OAuth)
+	require.Equal(t, "platform.claude.com", a.OAuth.TokenEndpoint.Host)
+	require.Equal(t, "/v1/oauth/token", a.OAuth.TokenEndpoint.Path)
+	require.Equal(t, "sk-ant-oat01-proxy-managed", a.OAuth.Sentinels.AccessToken)
+	require.Equal(t, "sk-ant-ort01-proxy-managed", a.OAuth.Sentinels.RefreshToken)
+	require.NotNil(t, a.OAuth.CredentialFile)
+	require.Equal(t, "~/.claude/.credentials.json", a.OAuth.CredentialFile.Path)
+	require.NotNil(t, a.OAuth.CredentialFile.Structure)
+	require.NotNil(t, a.OAuth.ResponseFields)
+	require.Equal(t, "access_token", a.OAuth.ResponseFields.AccessToken)
+	require.Equal(t, []string{"ANTHROPIC_API_KEY"}, a.OAuth.SkipIfEnv)
+	require.False(t, a.OAuth.Passthrough)
+
+	// github — basic auth with username for git HTTPS.
+	g := art.Credentials[1]
+	require.Equal(t, "github", g.Service)
+	require.Len(t, g.ApiKey.Inject, 2)
+	require.Equal(t, "x-access-token", g.ApiKey.Inject[1].Username)
+
+	// workos — passthrough OAuth (passthroughReason is deliberately
+	// deferred to a later release; this assertion will gain a reason
+	// check if/when that field lands).
+	w := art.Credentials[2]
+	require.True(t, w.OAuth.Passthrough)
+}
+
+// TestV1Credentials_FullShape_RoundTripsToList exercises the parallel-load
+// contract for the credentials redesign: a realistic v1 spec.yaml using
+// credentials.sources + network.serviceAuth + network.serviceDomains +
+// environment.proxyManaged loads cleanly, normalizes to a single v2
+// credentials[] entry per service, and produces one deprecation warning
+// per legacy block touched.
+func TestV1Credentials_FullShape_RoundTripsToList(t *testing.T) {
+	dir := t.TempDir()
+	specYAML := `schemaVersion: "1"
+kind: sandbox
+name: creds-v1
+sandbox:
+  image: docker/sandbox-templates:shell-docker
+credentials:
+  sources:
+    anthropic:
+      env: [ANTHROPIC_API_KEY]
+      required: true
+network:
+  serviceDomains:
+    api.anthropic.com: anthropic
+  serviceAuth:
+    anthropic:
+      headerName: x-api-key
+      valueFormat: "%s"
+environment:
+  proxyManaged: [ANTHROPIC_API_KEY]
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "spec.yaml"), []byte(specYAML), 0o644))
+	art, err := LoadFromDirectory(dir)
+	require.NoError(t, err)
+
+	// The four v1 surfaces fold into one v2 credentials[] entry.
+	require.Len(t, art.Credentials, 1)
+	c := art.Credentials[0]
+	require.Equal(t, "anthropic", c.Service)
+	require.True(t, c.Required)
+	require.NotNil(t, c.ApiKey)
+	require.Equal(t, "ANTHROPIC_API_KEY", c.ApiKey.Name)
+	require.Len(t, c.ApiKey.Inject, 1)
+	require.Equal(t, "api.anthropic.com", c.ApiKey.Inject[0].Domain)
+	require.Equal(t, "x-api-key", c.ApiKey.Inject[0].Header)
+	require.Equal(t, "%s", c.ApiKey.Inject[0].Format)
+
+	// One deprecation warning per legacy block.
+	var sourcesWarn, serviceAuthWarn, serviceDomainsWarn, proxyManagedWarn bool
+	for _, w := range art.Warnings {
+		switch {
+		case strings.Contains(w, "credentials.sources"):
+			sourcesWarn = true
+		case strings.Contains(w, "network.serviceAuth"):
+			serviceAuthWarn = true
+		case strings.Contains(w, "network.serviceDomains"):
+			serviceDomainsWarn = true
+		case strings.Contains(w, "environment.proxyManaged"):
+			proxyManagedWarn = true
+		}
+	}
+	require.True(t, sourcesWarn, "expected credentials.sources warning, got %v", art.Warnings)
+	require.True(t, serviceAuthWarn, "expected network.serviceAuth warning, got %v", art.Warnings)
+	require.True(t, serviceDomainsWarn, "expected network.serviceDomains warning, got %v", art.Warnings)
+	require.True(t, proxyManagedWarn, "expected environment.proxyManaged warning, got %v", art.Warnings)
+}
+
+// TestV1OAuth_StandaloneBlock_RoundTripsToCredentials exercises the
+// parallel-load contract for the standalone top-level oauth: block →
+// credentials[].oauth migration.
+func TestV1OAuth_StandaloneBlock_RoundTripsToCredentials(t *testing.T) {
+	dir := t.TempDir()
+	specYAML := `schemaVersion: "1"
+kind: sandbox
+name: oauth-v1
+sandbox:
+  image: docker/sandbox-templates:shell-docker
+oauth:
+  service: openai
+  tokenEndpoint: {host: auth.openai.com, path: /oauth/token}
+  sentinels: {accessToken: oai-oat01-proxy-managed, refreshToken: oai-ort01-proxy-managed}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "spec.yaml"), []byte(specYAML), 0o644))
+	art, err := LoadFromDirectory(dir)
+	require.NoError(t, err)
+
+	require.Len(t, art.Credentials, 1)
+	c := art.Credentials[0]
+	require.Equal(t, "openai", c.Service)
+	require.NotNil(t, c.OAuth)
+	require.Equal(t, "auth.openai.com", c.OAuth.TokenEndpoint.Host)
+	require.Equal(t, "/oauth/token", c.OAuth.TokenEndpoint.Path)
+
+	var oauthWarn bool
+	for _, w := range art.Warnings {
+		if strings.Contains(w, "oauth:") && strings.Contains(w, "standalone") {
+			oauthWarn = true
+		}
+	}
+	require.True(t, oauthWarn, "expected standalone oauth: deprecation warning, got %v", art.Warnings)
+}
+
+// TestV2CapsNetwork_Accepted exercises the v2 caps.network block —
+// allow + deny lists with the three P2 formats (exact, exact:port,
+// single-label wildcard).
+func TestV2CapsNetwork_Accepted(t *testing.T) {
+	dir := t.TempDir()
+	specYAML := `schemaVersion: "2"
+kind: sandbox
+name: caps-test
+sandbox:
+  image: docker/sandbox-templates:shell-docker
+caps:
+  network:
+    allow: [api.anthropic.com, api.openai.com:443, "*.github.com"]
+    deny: [malware.example.com]
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "spec.yaml"), []byte(specYAML), 0o644))
+	art, err := LoadFromDirectory(dir)
+	require.NoError(t, err)
+	require.NotNil(t, art.Caps)
+	require.NotNil(t, art.Caps.Network)
+	require.ElementsMatch(t, []string{"api.anthropic.com", "api.openai.com:443", "*.github.com"}, art.Caps.Network.Allow)
+	require.ElementsMatch(t, []string{"malware.example.com"}, art.Caps.Network.Deny)
+}
+
+// TestV1NetworkAllowedDomains_RoundTripsToCapsNetwork exercises the
+// parallel-load contract for the network -> caps.network rename: a v1
+// spec with network.allowedDomains / network.deniedDomains loads
+// cleanly, normalizes to caps.network.allow / .deny, and produces one
+// deprecation warning per legacy field.
+func TestV1NetworkAllowedDomains_RoundTripsToCapsNetwork(t *testing.T) {
+	dir := t.TempDir()
+	specYAML := `schemaVersion: "1"
+kind: sandbox
+name: net-v1
+sandbox:
+  image: docker/sandbox-templates:shell-docker
+network:
+  allowedDomains: [api.anthropic.com]
+  deniedDomains: [malware.example.com]
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "spec.yaml"), []byte(specYAML), 0o644))
+	art, err := LoadFromDirectory(dir)
+	require.NoError(t, err)
+
+	require.NotNil(t, art.Caps)
+	require.NotNil(t, art.Caps.Network)
+	require.Contains(t, art.Caps.Network.Allow, "api.anthropic.com")
+	require.ElementsMatch(t, []string{"malware.example.com"}, art.Caps.Network.Deny)
+
+	var allowWarn, denyWarn bool
+	for _, w := range art.Warnings {
+		switch {
+		case strings.Contains(w, "network.allowedDomains"):
+			allowWarn = true
+		case strings.Contains(w, "network.deniedDomains"):
+			denyWarn = true
+		}
+	}
+	require.True(t, allowWarn, "expected network.allowedDomains warning, got %v", art.Warnings)
+	require.True(t, denyWarn, "expected network.deniedDomains warning, got %v", art.Warnings)
 }
