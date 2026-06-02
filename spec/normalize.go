@@ -2,6 +2,7 @@ package spec
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -251,8 +252,17 @@ func (s *specFile) normalizeLegacyCredentials(w *warnings) error {
 	// Fold v1 network.serviceDomains + network.serviceAuth into inject entries.
 	if s.LegacyNetwork != nil {
 		// Domain -> service map; for each, emit one inject entry with header
-		// from serviceAuth if present.
-		for domain, svc := range s.LegacyNetwork.ServiceDomains {
+		// from serviceAuth if present. Iterate in sorted domain order so the
+		// resulting Credentials[].ApiKey.Inject list is deterministic — Go map
+		// iteration order is randomised, so otherwise byte-identical specs
+		// would produce different normalized artifacts across loads.
+		domains := make([]string, 0, len(s.LegacyNetwork.ServiceDomains))
+		for d := range s.LegacyNetwork.ServiceDomains {
+			domains = append(domains, d)
+		}
+		sort.Strings(domains)
+		for _, domain := range domains {
+			svc := s.LegacyNetwork.ServiceDomains[domain]
 			if v2Services[svc] {
 				continue
 			}
