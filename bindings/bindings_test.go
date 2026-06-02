@@ -77,17 +77,24 @@ bindings:
 	require.ErrorContains(t, err, "exactly one of env or file")
 }
 
-func TestLoad_EmptyDiscoveryRejected(t *testing.T) {
+func TestLoad_EmptyDiscoveryAccepted(t *testing.T) {
+	// Discovery is optional — a binding with only allowedDomains is the
+	// canonical way to express "the value lives in the secret store, I'm
+	// just declaring the trust scope here." The resolver consults the
+	// store before any user-declared discovery entries so an empty
+	// discovery list is well-formed.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "credentials.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(`
 bindings:
-  bad:
+  store-only:
     discovery: []
     allowedDomains: [foo.example.com]
 `), 0o600))
-	_, err := Load(path)
-	require.ErrorContains(t, err, "discovery list cannot be empty")
+	b, err := Load(path)
+	require.NoError(t, err)
+	require.Equal(t, []string{"foo.example.com"}, b.Bindings["store-only"].AllowedDomains)
+	require.Empty(t, b.Bindings["store-only"].Discovery)
 }
 
 func TestLoad_FilePathRequired(t *testing.T) {
