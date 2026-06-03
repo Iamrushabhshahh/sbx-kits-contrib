@@ -204,16 +204,14 @@ type NetworkPolicy struct {
 	// other allow lists contributed by composed kits.
 	DeniedDomains []string `json:"deniedDomains,omitempty" yaml:"deniedDomains,omitempty"`
 
-	// PublishedPorts is a list of in-container ports the kit wants the
-	// sandbox runtime to expose on the host so external tooling can reach
-	// services the kit runs inside the sandbox (a git-daemon, code-server,
-	// a Jupyter kernel, …). Each entry is published to an ephemeral host
-	// port on 127.0.0.1 when the sandbox starts; the binding is released
-	// automatically when the sandbox is deleted.
+	// PublishedPorts is the v1 location for declared ports
+	// (`network.publishedPorts`). In v2 this moved to the top-level
+	// `publishedPorts:` field; normalize promotes this shim there with a
+	// deprecation warning. Retained only so v1 spec.yaml still decodes
+	// under strict (KnownFields) decoding. Removed in the Phase 6 cutover.
 	//
-	// Users who want a fixed host port keep using `sbx ports --publish`
-	// on top of the kit's declaration — this field is for the
-	// "publish-on-start" UX, not for pinning a specific host port.
+	// See PublishedPort and Artifact.PublishedPorts for the semantics
+	// (ephemeral host port on 127.0.0.1; `sbx ports --publish` for pinning).
 	PublishedPorts []PublishedPort `json:"publishedPorts,omitempty" yaml:"publishedPorts,omitempty"`
 }
 
@@ -473,10 +471,13 @@ type Artifact struct {
 	// in the consumer that performs the merge.
 	Locked []string `json:"locked,omitempty"`
 
-	// Network is the optional network policy. Post-Phase-3 commit 6 only
-	// PublishedPorts remains canonical here; AllowedDomains/DeniedDomains
-	// move to Caps.Network.Allow/Deny. Commit 7 drops the parent struct.
-	Network *NetworkPolicy `json:"network,omitempty"`
+	// PublishedPorts lists in-container ports the kit wants the runtime to
+	// publish on the host when the sandbox starts. It is a top-level
+	// canonical field in v2 — port publishing is inbound service exposure,
+	// a separate concern from the outbound egress policy under Caps.Network.
+	// The v1 `network.publishedPorts` location is promoted here by normalize
+	// with a deprecation warning.
+	PublishedPorts []PublishedPort `json:"publishedPorts,omitempty"`
 
 	// Caps is the v2 capabilities block. caps.network is the canonical
 	// home for egress allow/deny lists; future caps.* surfaces attach
@@ -643,10 +644,14 @@ type specFile struct {
 	// LegacyNetwork / LegacyOAuth / Environment.LegacyProxyManaged
 	// shims into Artifact.Credentials.
 	Credentials credentialsField `yaml:"credentials,omitempty"`
+	// PublishedPorts is the v2 canonical top-level `publishedPorts:` list.
+	// Decoded directly from YAML; normalize also promotes the v1
+	// LegacyNetwork.PublishedPorts shim into this slice.
+	PublishedPorts []PublishedPort `yaml:"publishedPorts,omitempty"`
 	// LegacyNetwork absorbs the v1 top-level `network:` block. normalize
-	// folds its serviceDomains/serviceAuth fields into Credentials and
-	// copies its allowedDomains/deniedDomains/publishedPorts to
-	// Artifact.Network. Removed in the Phase 6 schema cutover.
+	// folds its serviceDomains/serviceAuth fields into Credentials, its
+	// allowedDomains/deniedDomains into Caps.Network, and its publishedPorts
+	// into the top-level PublishedPorts. Removed in the Phase 6 schema cutover.
 	LegacyNetwork *NetworkPolicy     `yaml:"network,omitempty"`
 	Environment   *EnvironmentPolicy `yaml:"environment,omitempty"`
 	Settings      *SettingsPolicy    `yaml:"settings,omitempty"`

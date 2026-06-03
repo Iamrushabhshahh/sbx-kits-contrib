@@ -110,15 +110,22 @@ func ValidateNetworkPolicy(n *NetworkPolicy) error {
 		}
 	}
 
-	for i, p := range n.PublishedPorts {
+	return nil
+}
+
+// ValidatePublishedPorts validates the canonical top-level publishedPorts
+// list: each entry's container port must be in 1..65535 and its protocol must
+// be empty (defaulted to "tcp" at consumption time), "tcp", or "udp".
+func ValidatePublishedPorts(ports []PublishedPort) error {
+	for i, p := range ports {
 		if p.Container < 1 || p.Container > 65535 {
-			return fmt.Errorf("network: publishedPorts[%d].container must be in 1..65535 (got %d)", i, p.Container)
+			return fmt.Errorf("publishedPorts[%d].container must be in 1..65535 (got %d)", i, p.Container)
 		}
 		switch p.Protocol {
 		case "", "tcp", "udp":
 			// "" is accepted and defaults to "tcp" at consumption time.
 		default:
-			return fmt.Errorf("network: publishedPorts[%d].protocol must be empty, \"tcp\" or \"udp\" (got %q)", i, p.Protocol)
+			return fmt.Errorf("publishedPorts[%d].protocol must be empty, \"tcp\" or \"udp\" (got %q)", i, p.Protocol)
 		}
 	}
 
@@ -267,7 +274,7 @@ func ValidateArtifact(a *Artifact) error {
 	if err := ValidateLocked(a.Locked); err != nil {
 		return err
 	}
-	if err := ValidateNetworkPolicy(a.Network); err != nil {
+	if err := ValidatePublishedPorts(a.PublishedPorts); err != nil {
 		return err
 	}
 	if err := ValidateEnvironmentPolicy(a.Environment); err != nil {

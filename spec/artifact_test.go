@@ -3,6 +3,7 @@ package spec
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -19,7 +20,7 @@ func TestLoadFromDirectory(t *testing.T) {
 		require.Equal(t, "1.0.0", a.Manifest.Version)
 		require.Equal(t, "https://example.com/sample-mixin", a.Manifest.SourceURL)
 		require.Empty(t, a.Manifest.Template, "mixins have no template")
-		require.NotNil(t, a.Network)
+		require.NotEmpty(t, a.PublishedPorts)
 		require.NotNil(t, a.Credentials)
 		require.NotNil(t, a.Environment)
 		require.NotNil(t, a.Settings)
@@ -102,47 +103,84 @@ description: "loaded from spec.yml"
 	require.Equal(t, "yml-kit", a.Manifest.Name)
 }
 
-func TestLoadFromFS_NetworkPublishedPorts(t *testing.T) {
-	// YAML round-trip for the new network.publishedPorts field: the
-	// minimal form (just container) and the full form (container +
-	// protocol + name) must both parse, defaulting protocol at use-site
-	// rather than at decode-time (the spec keeps zero values).
+func TestLoadFromFS_PublishedPorts_V2TopLevel(t *testing.T) {
+	// v2 canonical form: top-level `publishedPorts:`. The minimal form
+	// (just container) and the full form (container + protocol + name) must
+	// both parse, defaulting protocol at use-site rather than at decode-time
+	// (the spec keeps zero values). No deprecation warning.
 	fsys := fstest.MapFS{
 		"port-kit/spec.yaml": &fstest.MapFile{
-			Data: []byte(`schemaVersion: "1"
+			Data: []byte(`schemaVersion: "2"
 kind: mixin
 name: port-kit
 displayName: Port Kit
-description: "exercises network.publishedPorts"
-network:
-  publishedPorts:
-    - container: 9418
-    - container: 8080
-      protocol: tcp
-      name: web
-    - container: 53
-      protocol: udp
-      name: dns
+description: "exercises top-level publishedPorts"
+publishedPorts:
+  - container: 9418
+  - container: 8080
+    protocol: tcp
+    name: web
+  - container: 53
+    protocol: udp
+    name: dns
 `),
 		},
 	}
 
 	a, err := LoadFromFS(fsys, "port-kit")
 	require.NoError(t, err)
-	require.NotNil(t, a.Network)
-	require.Len(t, a.Network.PublishedPorts, 3)
+	require.Len(t, a.PublishedPorts, 3)
 
-	require.Equal(t, 9418, a.Network.PublishedPorts[0].Container)
-	require.Empty(t, a.Network.PublishedPorts[0].Protocol, "minimal form leaves protocol empty; consumers default it")
-	require.Empty(t, a.Network.PublishedPorts[0].Name)
+	require.Equal(t, 9418, a.PublishedPorts[0].Container)
+	require.Empty(t, a.PublishedPorts[0].Protocol, "minimal form leaves protocol empty; consumers default it")
+	require.Empty(t, a.PublishedPorts[0].Name)
 
-	require.Equal(t, 8080, a.Network.PublishedPorts[1].Container)
-	require.Equal(t, "tcp", a.Network.PublishedPorts[1].Protocol)
-	require.Equal(t, "web", a.Network.PublishedPorts[1].Name)
+	require.Equal(t, 8080, a.PublishedPorts[1].Container)
+	require.Equal(t, "tcp", a.PublishedPorts[1].Protocol)
+	require.Equal(t, "web", a.PublishedPorts[1].Name)
 
-	require.Equal(t, 53, a.Network.PublishedPorts[2].Container)
-	require.Equal(t, "udp", a.Network.PublishedPorts[2].Protocol)
-	require.Equal(t, "dns", a.Network.PublishedPorts[2].Name)
+	require.Equal(t, 53, a.PublishedPorts[2].Container)
+	require.Equal(t, "udp", a.PublishedPorts[2].Protocol)
+	require.Equal(t, "dns", a.PublishedPorts[2].Name)
+
+	for _, w := range a.Warnings {
+		require.NotContains(t, w, "publishedPorts", "canonical v2 form must not warn")
+	}
+}
+
+func TestLoadFromFS_PublishedPorts_V1NetworkDeprecated(t *testing.T) {
+	// v1 compat: `network.publishedPorts` is promoted to the canonical
+	// top-level Artifact.PublishedPorts with a deprecation warning, matching
+	// how the other v1 network.* fields migrate.
+	fsys := fstest.MapFS{
+		"port-kit/spec.yaml": &fstest.MapFile{
+			Data: []byte(`schemaVersion: "1"
+kind: mixin
+name: port-kit
+displayName: Port Kit
+description: "exercises v1 network.publishedPorts"
+network:
+  publishedPorts:
+    - container: 8080
+      protocol: tcp
+      name: web
+`),
+		},
+	}
+
+	a, err := LoadFromFS(fsys, "port-kit")
+	require.NoError(t, err)
+	require.Len(t, a.PublishedPorts, 1)
+	require.Equal(t, 8080, a.PublishedPorts[0].Container)
+	require.Equal(t, "web", a.PublishedPorts[0].Name)
+
+	var found bool
+	for _, w := range a.Warnings {
+		if strings.Contains(w, "network.publishedPorts") {
+			found = true
+		}
+	}
+	require.True(t, found, "v1 network.publishedPorts must emit a deprecation warning; got %v", a.Warnings)
 }
 
 func TestParseArtifact_NoSpecFile(t *testing.T) {

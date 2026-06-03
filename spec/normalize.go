@@ -29,8 +29,22 @@ func (s *specFile) normalize(w *warnings) error {
 	if err := s.normalizeCapsNetwork(w); err != nil {
 		return err
 	}
+	s.normalizePublishedPorts(w)
 	s.normalizeAgentContext(w)
 	return nil
+}
+
+// normalizePublishedPorts promotes the v1 `network.publishedPorts`
+// (LegacyNetwork) into the canonical top-level PublishedPorts list, emitting
+// a deprecation warning. v2 entries already decoded into PublishedPorts are
+// kept; the legacy entries are appended after them.
+func (s *specFile) normalizePublishedPorts(w *warnings) {
+	if s.LegacyNetwork == nil || len(s.LegacyNetwork.PublishedPorts) == 0 {
+		return
+	}
+	s.PublishedPorts = append(s.PublishedPorts, s.LegacyNetwork.PublishedPorts...)
+	s.LegacyNetwork.PublishedPorts = nil
+	w.deprecate("network.publishedPorts", "use the top-level 'publishedPorts' field instead (kit-spec v2)")
 }
 
 // normalizeKind maps the v1 `kind: agent` value to `sandbox`. The v2 value

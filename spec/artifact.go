@@ -125,30 +125,23 @@ func parseArtifactBytes(data []byte) (*Artifact, error) {
 		return nil, fmt.Errorf("artifact: %w", err)
 	}
 
-	// Build the canonical Artifact.Network from LegacyNetwork's
-	// PublishedPorts (the only NetworkPolicy field that survives as a
-	// canonical concern post-Phase-3 commit 7). AllowedDomains and
-	// DeniedDomains moved to Caps.Network; ServiceDomains and
-	// ServiceAuth moved to Credentials[].ApiKey.Inject.
-	var network *NetworkPolicy
-	if spec.LegacyNetwork != nil && len(spec.LegacyNetwork.PublishedPorts) > 0 {
-		network = &NetworkPolicy{
-			PublishedPorts: spec.LegacyNetwork.PublishedPorts,
-		}
-	}
-
+	// PublishedPorts is canonical at the top level in v2. normalize has
+	// already promoted any v1 LegacyNetwork.PublishedPorts into
+	// spec.PublishedPorts (with a deprecation warning), so this is a
+	// straight copy. AllowedDomains/DeniedDomains moved to Caps.Network;
+	// ServiceDomains/ServiceAuth moved to Credentials[].ApiKey.Inject.
 	return &Artifact{
-		Manifest:     spec.Manifest,
-		Extends:      spec.Extends,
-		Locked:       spec.Locked,
-		Network:      network,
-		Caps:         spec.Caps,
-		Credentials:  spec.Credentials.List,
-		Environment:  spec.Environment,
-		Settings:     spec.Settings,
-		Commands:     spec.Commands,
-		AgentContext: spec.AgentContext,
-		Warnings:     w.messages,
+		Manifest:       spec.Manifest,
+		Extends:        spec.Extends,
+		Locked:         spec.Locked,
+		PublishedPorts: spec.PublishedPorts,
+		Caps:           spec.Caps,
+		Credentials:    spec.Credentials.List,
+		Environment:    spec.Environment,
+		Settings:       spec.Settings,
+		Commands:       spec.Commands,
+		AgentContext:   spec.AgentContext,
+		Warnings:       w.messages,
 	}, nil
 }
 
