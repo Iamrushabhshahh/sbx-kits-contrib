@@ -28,6 +28,7 @@ func (s *specFile) normalize(w *warnings) error {
 	if err := s.normalizeLegacyOAuthBlock(w); err != nil {
 		return err
 	}
+	s.deriveProxyManagedEnv()
 	if err := s.normalizeCapsNetwork(w); err != nil {
 		return err
 	}
@@ -39,6 +40,40 @@ func (s *specFile) normalize(w *warnings) error {
 	s.normalizeLegacySettings(w)
 	s.normalizeVolumes(w)
 	return nil
+}
+
+// deriveProxyManagedEnv sets Environment.ProxyManaged to the names of the
+// credentials whose apiKey is marked ProxyManaged. This is the canonical v2
+// source of the in-container sentinel set: the v1 `environment.proxyManaged`
+// list folds onto `apiKey.proxyManaged` (normalizeLegacyCredentials), and v2
+// specs declare the marker directly. The list is recomputed here so the engine
+// consumer (which still reads Environment.ProxyManaged) sees one source of
+// truth regardless of v1/v2 input. It deliberately OVERRIDES any decoded list,
+// so a v1 entry that was only a discovery alias (not a credential name) drops
+// out — e.g. shell's GEMINI_API_KEY, whose google credential keeps the
+// canonical GOOGLE_API_KEY. The Environment.ProxyManaged field itself is slated
+// for removal in the Phase 6 schema cutover, when consumers move to reading the
+// credentials directly.
+func (s *specFile) deriveProxyManagedEnv() {
+	var names []string
+	seen := map[string]bool{}
+	for _, c := range s.Credentials.List {
+		if c.ApiKey != nil && c.ApiKey.ProxyManaged && c.ApiKey.Name != "" && !seen[c.ApiKey.Name] {
+			seen[c.ApiKey.Name] = true
+			names = append(names, c.ApiKey.Name)
+		}
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		if s.Environment != nil {
+			s.Environment.ProxyManaged = nil
+		}
+		return
+	}
+	if s.Environment == nil {
+		s.Environment = &EnvironmentPolicy{}
+	}
+	s.Environment.ProxyManaged = names
 }
 
 // normalizeLegacySettings drops the v1 `settings:` block with a deprecation
@@ -371,9 +406,10 @@ func (s *specFile) normalizeLegacyCredentials(w *warnings) error {
 	// LegacySources.required, then fold proxyManaged as the apiKey.Name
 	// fallback if LegacySources didn't supply one.
 	type pending struct {
-		required bool
-		envName  string // becomes ApiKey.Name
-		inject   []ApiKeyInject
+		required     bool
+		envName      string // becomes ApiKey.Name
+		proxyManaged bool   // becomes ApiKey.ProxyManaged
+		inject       []ApiKeyInject
 	}
 	byService := make(map[string]*pending)
 
@@ -465,6 +501,7 @@ func (s *specFile) normalizeLegacyCredentials(w *warnings) error {
 			if p.envName == "" {
 				p.envName = envName
 			}
+			p.proxyManaged = true
 		}
 	}
 
@@ -480,7 +517,7 @@ func (s *specFile) normalizeLegacyCredentials(w *warnings) error {
 		p := byService[svc]
 		c := Credential{Service: svc, Required: p.required}
 		if p.envName != "" || len(p.inject) > 0 {
-			c.ApiKey = &ApiKey{Name: p.envName, Inject: p.inject}
+			c.ApiKey = &ApiKey{Name: p.envName, ProxyManaged: p.proxyManaged, Inject: p.inject}
 		}
 		s.Credentials.List = append(s.Credentials.List, c)
 	}
