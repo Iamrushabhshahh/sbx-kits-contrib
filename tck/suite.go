@@ -246,7 +246,8 @@ func (s *Suite) RunValidationTests(t *testing.T) {
 
 		t.Run("required_fields", func(t *testing.T) {
 			require.NotEmpty(t, m.SchemaVersion, "schemaVersion is required")
-			require.Equal(t, spec.SchemaVersion, m.SchemaVersion, "schemaVersion must be %q", spec.SchemaVersion)
+			require.Contains(t, spec.SupportedSchemaVersions, m.SchemaVersion,
+				"schemaVersion must be one of the supported versions %v", spec.SupportedSchemaVersions)
 			require.NotEmpty(t, m.Kind, "kind is required")
 			require.NotEmpty(t, m.Name, "name is required")
 			require.NotEmpty(t, m.DisplayName, "displayName is required")
