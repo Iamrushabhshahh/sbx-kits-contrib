@@ -8,7 +8,9 @@
 package spec
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"sort"
 
 	"go.yaml.in/yaml/v3"
@@ -537,11 +539,40 @@ type ArtifactFile struct {
 	// Mode is the file permissions (default 0644).
 	Mode int64 `json:"mode"`
 
-	// Content holds the raw file bytes.
+	// Content holds the raw file bytes. Eager loaders (LoadFromDirectory,
+	// LoadFromFS) populate this field; streaming loaders
+	// (OpenFromDirectory, OpenFromFS) leave it nil and set ContentSource
+	// instead. Content is always non-nil (even for empty files) on the
+	// eager path. LoadFromBytes never populates Content (it has no notion
+	// of a file source; callers populate Files from their own source).
 	Content []byte `json:"content"`
 
 	// Size is the file size in bytes.
 	Size int64 `json:"size"`
+
+	// ContentSource streams this file's content on demand. Streaming loaders
+	// set it; eager loaders leave it nil. The tag json:"-" ensures that
+	// a function value — which is not JSON-serializable — is always omitted
+	// from marshaling. Call Open to obtain a reader regardless of which
+	// loading strategy was used.
+	ContentSource func() (io.ReadCloser, error) `json:"-"`
+}
+
+// Open returns a reader for this file's content. It follows this precedence:
+//   - If Content is non-nil (eager path), returns a reader backed by Content.
+//   - Otherwise, if ContentSource is non-nil (streaming path), calls it.
+//   - If neither is set, returns an error.
+//
+// Callers are responsible for closing the returned ReadCloser. Calling Open
+// multiple times on a streaming file yields independent readers.
+func (f *ArtifactFile) Open() (io.ReadCloser, error) {
+	if f.Content != nil {
+		return io.NopCloser(bytes.NewReader(f.Content)), nil
+	}
+	if f.ContentSource != nil {
+		return f.ContentSource()
+	}
+	return nil, fmt.Errorf("artifact file %q: no content or content source", f.RelativePath)
 }
 
 // Artifact represents a fully loaded and validated kit artifact.
@@ -564,6 +595,12 @@ type Artifact struct {
 	// The spec library only validates well-formedness; enforcement lives
 	// in the consumer that performs the merge.
 	Locked []string `json:"locked,omitempty"`
+
+	// Licenses lists SPDX license identifiers governing the kit (RFC §280,
+	// P2). The spec library only validates well-formedness; composition
+	// (union of parent/mixin licenses) lives in the consumer that performs
+	// the merge. Declarative metadata with no runtime effect.
+	Licenses []string `json:"licenses,omitempty"`
 
 	// PublishedPorts lists in-container ports the kit wants the runtime to
 	// publish on the host when the sandbox starts. It is a top-level
@@ -732,11 +769,12 @@ type specFile struct {
 	// Manifest.Volumes carries `yaml:"-"` so this field owns the decode;
 	// normalize folds Volumes.List + Volumes.LegacyMap into the canonical
 	// Manifest.Volumes slice.
-	Volumes volumesField  `yaml:"volumes,omitempty"`
-	Extends string        `yaml:"extends,omitempty"`
-	Mixins  []string      `yaml:"mixins,omitempty"`
-	Locked  []string      `yaml:"locked,omitempty"`
-	Sandbox *sandboxBlock `yaml:"sandbox,omitempty"`
+	Volumes  volumesField  `yaml:"volumes,omitempty"`
+	Extends  string        `yaml:"extends,omitempty"`
+	Mixins   []string      `yaml:"mixins,omitempty"`
+	Locked   []string      `yaml:"locked,omitempty"`
+	Licenses []string      `yaml:"licenses,omitempty"`
+	Sandbox  *sandboxBlock `yaml:"sandbox,omitempty"`
 	// LegacyAgent holds the v1 `agent:` block. The normalize step
 	// migrates its contents to Sandbox with a deprecation warning. Drop
 	// in the Phase 6 schema-cutover commit.

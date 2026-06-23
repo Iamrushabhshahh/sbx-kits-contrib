@@ -86,7 +86,13 @@ func (s *Suite) RunContainerTests(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, 0, code, "mkdir -p %s failed", parentDir)
 
-			err = container.CopyToContainer(ctx, f.Content, containerPath, f.Mode)
+			rc, err := f.Open()
+			require.NoError(t, err, "failed to open %s for container copy", containerPath)
+			fileBytes, readErr := io.ReadAll(rc)
+			closeErr := rc.Close()
+			require.NoError(t, readErr, "failed to read %s for container copy", containerPath)
+			require.NoError(t, closeErr, "failed to close %s after read", containerPath)
+			err = container.CopyToContainer(ctx, fileBytes, containerPath, f.Mode)
 			require.NoError(t, err, "failed to copy %s to container", containerPath)
 		}
 
