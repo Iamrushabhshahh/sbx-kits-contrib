@@ -3,7 +3,6 @@ package spec
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -41,17 +40,9 @@ func TestLoadFromDirectory(t *testing.T) {
 		require.Equal(t, "SAMPLE.md", a.Manifest.AIFilename)
 		require.NotEmpty(t, a.AgentContext)
 
-		// v1 network.publishedPorts is promoted to the canonical top-level
-		// PublishedPorts with a deprecation warning steering authors to the
-		// v2 spelling (sample-agent-v2 shows the canonical form).
+		// publishedPorts is canonical at the top level in v2.
 		require.Equal(t, []PublishedPort{{Container: 8080, Protocol: "tcp", Name: "web"}}, a.PublishedPorts)
-		var sawPortWarning bool
-		for _, w := range a.Warnings {
-			if strings.Contains(w, "network.publishedPorts") {
-				sawPortWarning = true
-			}
-		}
-		require.True(t, sawPortWarning, "v1 network.publishedPorts must warn; got %v", a.Warnings)
+		require.Empty(t, a.Warnings, "canonical v2 kit must not emit deprecation warnings")
 	})
 
 	t.Run("sample-agent-v2", func(t *testing.T) {
@@ -119,24 +110,10 @@ func TestLoadFromDirectory(t *testing.T) {
 	})
 }
 
-// TestV1Settings_AbsorbedWithDeprecationWarning asserts the Phase 4 behavior:
-// a v1 `settings:` block must still PARSE under strict decoding (the
-// LegacySettings shim absorbs it) and normalize must emit a deprecation
-// warning naming `settings` — not strict-reject. The canonical
-// Artifact.Settings surface is gone (removed in Phase 4); strict-reject is the
-// Phase 6 cutover's job. The sample-mixin fixture still carries a settings:
-// block, so it exercises the shim directly.
-func TestV1Settings_AbsorbedWithDeprecationWarning(t *testing.T) {
-	a, err := LoadFromDirectory("testdata/sample-mixin")
-	require.NoError(t, err, "v1 settings: must load (absorb-and-warn), not strict-reject in Phase 4")
-	require.Contains(t, strings.Join(a.Warnings, "\n"), "settings",
-		"v1 settings: must emit a deprecation warning; got %v", a.Warnings)
-}
-
 func TestLoadFromFS(t *testing.T) {
 	fsys := fstest.MapFS{
 		"mykit/spec.yaml": &fstest.MapFile{
-			Data: []byte(`schemaVersion: "1"
+			Data: []byte(`schemaVersion: "2"
 kind: mixin
 name: fs-kit
 displayName: FS Kit
@@ -159,7 +136,7 @@ description: "loaded from fs.FS"
 
 func TestParseArtifact_SpecYmlFallback(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "spec.yml"), []byte(`schemaVersion: "1"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "spec.yml"), []byte(`schemaVersion: "2"
 kind: mixin
 name: yml-kit
 displayName: YML Kit
@@ -193,7 +170,7 @@ func TestParseArtifact_InvalidYAML(t *testing.T) {
 func TestParseArtifact_StrictUnknownField(t *testing.T) {
 	t.Run("unknown_top_level_key_rejected", func(t *testing.T) {
 		dir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "spec.yaml"), []byte(`schemaVersion: "1"
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "spec.yaml"), []byte(`schemaVersion: "2"
 kind: mixin
 name: bogus-toplevel
 totallyBogus: yes
@@ -204,10 +181,10 @@ totallyBogus: yes
 
 	t.Run("unknown_nested_key_rejected", func(t *testing.T) {
 		dir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "spec.yaml"), []byte(`schemaVersion: "1"
-kind: agent
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "spec.yaml"), []byte(`schemaVersion: "2"
+kind: sandbox
 name: bogus-nested
-agent:
+sandbox:
   image: docker/sandbox-templates:shell-docker
   totallyBogus: yes
 `), 0o644))
@@ -233,7 +210,7 @@ func TestCollectFilesFromDir_SymlinkEscape(t *testing.T) {
 
 func TestLoadFromBytes(t *testing.T) {
 	t.Run("happy_path", func(t *testing.T) {
-		a, err := LoadFromBytes([]byte(`schemaVersion: "1"
+		a, err := LoadFromBytes([]byte(`schemaVersion: "2"
 kind: mixin
 name: bytes-kit
 displayName: Bytes Kit
@@ -251,7 +228,7 @@ description: loaded directly from bytes
 		// source (e.g. an OCI tar layer) and then call ValidateArtifact.
 		// Here we synthesize an Artifact that parses cleanly, then attach
 		// a malformed Files entry that only ValidateArtifact catches.
-		a, err := LoadFromBytes([]byte(`schemaVersion: "1"
+		a, err := LoadFromBytes([]byte(`schemaVersion: "2"
 kind: mixin
 name: deferred-validate
 `))
@@ -271,7 +248,7 @@ name: deferred-validate
 	t.Run("unknown_field_rejected", func(t *testing.T) {
 		// Strict-decode behaviour applies to LoadFromBytes the same way it
 		// does to LoadFromDirectory.
-		_, err := LoadFromBytes([]byte(`schemaVersion: "1"
+		_, err := LoadFromBytes([]byte(`schemaVersion: "2"
 kind: mixin
 name: typo-kit
 mystery: 42
@@ -281,7 +258,7 @@ mystery: 42
 }
 
 func TestManifest_VersionAndSourceURL(t *testing.T) {
-	a, err := LoadFromBytes([]byte(`schemaVersion: "1"
+	a, err := LoadFromBytes([]byte(`schemaVersion: "2"
 kind: mixin
 name: versioned-kit
 version: "2.3.1"

@@ -35,5 +35,6 @@ type (
 const (
 	KindAgent      = spec.KindAgent
 	KindSandbox    = spec.KindSandbox
+	KindMixin      = spec.KindMixin
 	MountTypeTmpfs = spec.MountTypeTmpfs
 )

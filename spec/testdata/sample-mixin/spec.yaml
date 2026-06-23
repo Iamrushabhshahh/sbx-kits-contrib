@@ -1,24 +1,11 @@
-schemaVersion: "1"
+schemaVersion: "2"
 kind: mixin
 name: sample-mixin
-version: "1.0.0"
+version: 1.0.0
 displayName: Sample Mixin
-description: "A test-only mixin that exercises every spec field the TCK validates"
+description: A test-only mixin that exercises every spec field the TCK validates
 sourceURL: https://example.com/sample-mixin
-
-network:
-  allowedDomains:
-    - example.com
-    - "*.example.org"
-  deniedDomains:
-    - tracker.example.com
-  serviceDomains:
-    api.example.com: example
-  serviceAuth:
-    example:
-      headerName: Authorization
-      valueFormat: "Bearer %s"
-  publishedPorts:
+publishedPorts:
     - container: 9418
     - container: 8080
       protocol: tcp
@@ -26,40 +13,43 @@ network:
     - container: 53
       protocol: udp
       name: dns
-
+caps:
+    network:
+        allow:
+            - example.com
+            - '*.example.org'
+        deny:
+            - tracker.example.com
 credentials:
-  sources:
-    example:
-      env:
-        - EXAMPLE_API_KEY
-      file:
-        path: "~/.example/credentials.json"
-        parser: "json:apiKey"
-      priority: env-first
-
+    - service: example
+      apiKey:
+        name: EXAMPLE_API_KEY
+        inject:
+            - domain: api.example.com
+              header: Authorization
+              format: Bearer %s
+    - service: sample_proxy
+      apiKey:
+        name: SAMPLE_PROXY_TOKEN
+        proxyManaged: true
 environment:
-  variables:
-    SAMPLE_HOME: /home/agent/.sample
-    SAMPLE_MODE: test
-  proxyManaged:
-    - SAMPLE_PROXY_TOKEN
-
-settings:
-  containerSettings:
-    enableFeatureX: true
-
+    variables:
+        SAMPLE_HOME: /home/agent/.sample
+        SAMPLE_MODE: test
 commands:
-  install:
-    - command: "echo installed"
-      user: "0"
-      description: Sample install
-  startup:
-    - command: ["echo", "started"]
-      user: "1000"
-      background: true
-      description: Sample startup
-  initFiles:
-    - path: /home/agent/.sample/init.conf
-      content: "workdir=${WORKDIR}"
-      mode: "0644"
-      description: Sample init file
+    install:
+        - command: echo installed
+          user: "0"
+          description: Sample install
+    startup:
+        - command:
+            - echo
+            - started
+          user: "1000"
+          background: true
+          description: Sample startup
+    initFiles:
+        - path: /home/agent/.sample/init.conf
+          content: workdir=${WORKDIR}
+          mode: "0644"
+          description: Sample init file

@@ -17,7 +17,7 @@ import (
 
 // minimalMixinYAML is reusable spec.yaml content for tests that need a valid
 // kit without caring about network / credentials / commands specifics.
-const minimalMixinYAML = `schemaVersion: "1"
+const minimalMixinYAML = `schemaVersion: "2"
 kind: mixin
 name: stream-test
 displayName: Stream Test
@@ -283,7 +283,7 @@ func TestOpenFromFS_Parity(t *testing.T) {
 	t.Run("mapfs", func(t *testing.T) {
 		fsys := fstest.MapFS{
 			"mykit/spec.yaml": &fstest.MapFile{
-				Data: []byte(`schemaVersion: "1"
+				Data: []byte(`schemaVersion: "2"
 kind: mixin
 name: fs-kit-streaming
 displayName: FS Kit Streaming
