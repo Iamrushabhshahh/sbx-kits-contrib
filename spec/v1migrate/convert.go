@@ -23,7 +23,7 @@ import (
 // settings:). changes is empty when the input already uses only canonical v2
 // fields, in which case the returned bytes equal the input (no rewrite needed).
 func Convert(data []byte) ([]byte, []string, error) {
-	a, err := spec.LoadFromBytes(data)
+	a, err := loadFromBytes(data)
 	if err != nil {
 		return nil, nil, err
 	}
