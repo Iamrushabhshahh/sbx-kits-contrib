@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/docker/sbx-kits-contrib/spec/v1migrate"
 )
 
 // TestMigrateSpec_FullShape exercises a v1 spec.yaml that uses every v1 → v2
@@ -21,7 +23,7 @@ func TestMigrateSpec_FullShape(t *testing.T) {
 		t.Fatalf("read expected: %v", err)
 	}
 
-	got, changes, err := migrateSpec(input)
+	got, changes, err := v1migrate.Convert(input)
 	if err != nil {
 		t.Fatalf("migrateSpec: %v", err)
 	}
@@ -69,7 +71,7 @@ func TestMigrateSpec_AlreadyV2(t *testing.T) {
 		t.Fatalf("read input: %v", err)
 	}
 
-	_, changes, err := migrateSpec(input)
+	_, changes, err := v1migrate.Convert(input)
 	if err != nil {
 		t.Fatalf("migrateSpec: %v", err)
 	}
@@ -216,7 +218,7 @@ func TestMigrate_Idempotent(t *testing.T) {
 		t.Fatalf("read expected: %v", err)
 	}
 
-	_, changes, err := migrateSpec(expected)
+	_, changes, err := v1migrate.Convert(expected)
 	if err != nil {
 		t.Fatalf("migrateSpec on v2-expected: %v", err)
 	}
@@ -238,7 +240,7 @@ network:
 credentials: {sources: {openai: {env: [OPENAI_API_KEY]}}}
 environment: {proxyManaged: [OPENAI_API_KEY]}
 `)
-	out, changes, err := migrateSpec(v1)
+	out, changes, err := v1migrate.Convert(v1)
 	if err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
