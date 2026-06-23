@@ -265,6 +265,42 @@ credentials:
 	require.True(t, w.OAuth.Passthrough)
 }
 
+// TestV1Rejected pins the Phase 6 cutover: the production loader is v2-only.
+// A v1 spec is rejected two ways — its v1-only keys hard-fail strict decode,
+// and a spec that is otherwise v2-shaped but declares schemaVersion "1" fails
+// validation. Authors convert with spec/v1migrate (scripts/migrate-v1-to-v2).
+func TestV1Rejected(t *testing.T) {
+	t.Run("v1_only_keys_rejected_at_decode", func(t *testing.T) {
+		// `kind: agent`, the `agent:`/`network:`/`memory:` blocks are no
+		// longer known fields; strict decode rejects them.
+		_, err := LoadFromBytes([]byte(`schemaVersion: "1"
+kind: agent
+name: legacy
+agent:
+  image: example/test:latest
+network:
+  allowedDomains: [example.com]
+memory: "legacy content"
+`))
+		require.Error(t, err)
+	})
+
+	t.Run("schema_version_1_rejected_at_validate", func(t *testing.T) {
+		// A spec that decodes cleanly (only v2-shaped keys) but declares
+		// schemaVersion "1" is rejected by the validating loader.
+		dir := t.TempDir()
+		specYAML := `schemaVersion: "1"
+kind: sandbox
+name: stale-version
+sandbox:
+  image: example/test:latest
+`
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "spec.yaml"), []byte(specYAML), 0o644))
+		_, err := LoadFromDirectory(dir)
+		require.ErrorContains(t, err, "unsupported schemaVersion")
+	})
+}
+
 // TestV2CapsNetwork_Accepted exercises the v2 caps.network block —
 // allow + deny lists with the three P2 formats (exact, exact:port,
 // single-label wildcard).

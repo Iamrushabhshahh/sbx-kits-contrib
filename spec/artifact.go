@@ -307,11 +307,10 @@ func parseArtifactBytes(data []byte) (*Artifact, error) {
 		return nil, fmt.Errorf("artifact: %w", err)
 	}
 
-	// PublishedPorts is canonical at the top level in v2. normalize has
-	// already promoted any v1 LegacyNetwork.PublishedPorts into
-	// spec.PublishedPorts (with a deprecation warning), so this is a
-	// straight copy. AllowedDomains/DeniedDomains moved to Caps.Network;
-	// ServiceDomains/ServiceAuth moved to Credentials[].ApiKey.Inject.
+	// Every field is canonical v2: publishedPorts, caps.network, and the
+	// credentials[] list decode straight from spec.yaml (the v1 network:/
+	// oauth:/credentials.sources shapes were removed in the Phase 6 cutover —
+	// the spec/v1migrate converter handles legacy specs).
 	return &Artifact{
 		Manifest:       spec.Manifest,
 		Extends:        spec.Extends,

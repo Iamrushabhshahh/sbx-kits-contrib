@@ -17,32 +17,27 @@ import (
 )
 
 // SchemaVersion is the default schemaVersion used when a tool scaffolds
-// a new kit. Stays at "1" while sbx releases v2-capable engines into
-// the field; flip to "2" once enough consumers can read v2 artifacts to
-// make it safe as a default. Authors who want v2 today set schemaVersion:
-// "2" in their spec.yaml explicitly.
-const SchemaVersion = "1"
+// a new kit, and the only version this loader accepts. The Phase 6 cutover
+// dropped v1: kit authors with a `schemaVersion: "1"` spec run
+// scripts/migrate-v1-to-v2 (the spec/v1migrate package) to convert it once.
+const SchemaVersion = "2"
 
-// SupportedSchemaVersions enumerates every schemaVersion value the
-// loader accepts. "1" is the legacy shape (the current default); "2"
-// opts the kit into the v2 OCI artifact format at distribution time —
-// the spec fields themselves are unchanged across the two versions.
-//
-// New entries should be appended (never reordered) so existing kits
-// continue to validate.
-var SupportedSchemaVersions = []string{"1", "2"}
+// SupportedSchemaVersions enumerates every schemaVersion value the loader
+// accepts. v1 was removed in the Phase 6 cutover, so this is v2-only; a v1
+// spec is rejected at load (see spec/v1migrate for the one-way converter).
+var SupportedSchemaVersions = []string{"2"}
 
 // Kind constants for manifest types.
 const (
 	// KindSandbox defines a sandbox kit (must have a sandbox image source).
-	// Only one sandbox kit is allowed per sandbox. Renamed from KindAgent
-	// in schemaVersion "2"; v1 `kind: agent` is mapped to this value at
-	// load time with a deprecation warning.
+	// Only one sandbox kit is allowed per sandbox. Renamed from the v1
+	// `kind: agent` value, which is no longer accepted by the v2-only loader.
 	KindSandbox = "sandbox"
 
-	// KindAgent is the v1 alias for KindSandbox. Accepted at load time
-	// with a deprecation warning. Drop in the Phase 4 schema-cutover
-	// commit.
+	// KindAgent is the retired v1 `kind: agent` value. The v2-only loader no
+	// longer accepts it, but the constant is retained: the spec/v1migrate
+	// converter folds it to KindSandbox, and external consumers still
+	// reference it. Not a valid kind for a v2 spec.yaml.
 	KindAgent = "agent"
 
 	// KindMixin defines an extension that adds capabilities.
@@ -61,7 +56,7 @@ const (
 
 // Manifest represents the identity and metadata of an agent or kit artifact.
 type Manifest struct {
-	// SchemaVersion is the schema version, currently "1".
+	// SchemaVersion is the schema version, currently "2".
 	SchemaVersion string `json:"schemaVersion" yaml:"schemaVersion"`
 
 	// Kind is "agent" for full agents or "mixin" for extensions.
@@ -121,10 +116,9 @@ type Manifest struct {
 	// for a RAM-backed mount).
 	//
 	// The yaml tag is "-" because the `volumes:` key is decoded at the
-	// specFile level through volumesField — a polymorphic wrapper that
-	// accepts both the v2 sequence shape and the v1 mapping shape (the
-	// latter with a deprecation warning, folded into this slice by
-	// normalize). Manifest stays the canonical Go-level destination.
+	// specFile level through volumesField (the v2 sequence shape) and folded
+	// into this slice by normalize. Manifest stays the canonical Go-level
+	// destination.
 	Volumes []MountSpec `json:"volumes,omitempty" yaml:"-"`
 }
 
@@ -254,9 +248,7 @@ type NetworkPolicy struct {
 
 	// PublishedPorts is the v1 location for declared ports
 	// (`network.publishedPorts`). In v2 this moved to the top-level
-	// `publishedPorts:` field; normalize promotes this shim there with a
-	// deprecation warning. Retained only so v1 spec.yaml still decodes
-	// under strict (KnownFields) decoding. Removed in the Phase 6 cutover.
+	// `publishedPorts:` field; the spec/v1migrate converter promotes it there.
 	//
 	// See PublishedPort and Artifact.PublishedPorts for the semantics
 	// (ephemeral host port on 127.0.0.1; `sbx ports --publish` for pinning).
@@ -292,10 +284,9 @@ type ServiceAuth struct {
 }
 
 // CredentialPolicy is the v1 `credentials:` block shape (mapping with
-// `sources:` inside). Kept as a deserialization target for the
-// credentialsField polymorphic wrapper on specFile; normalize folds its
-// contents into the canonical Artifact.Credentials []Credential list with
-// a deprecation warning. Removed in the Phase 6 schema cutover.
+// `sources:` inside). The production loader is v2-only and no longer decodes
+// it; the type is retained for ValidateCredentialPolicy and the spec/v1migrate
+// converter, which folds it into the canonical Artifact.Credentials list.
 type CredentialPolicy struct {
 	// Sources maps service identifiers to credential source definitions.
 	Sources map[string]CredentialSource `json:"sources,omitempty" yaml:"sources,omitempty"`
@@ -450,20 +441,20 @@ type EnvironmentPolicy struct {
 	// Variables are static environment variables to set in the container.
 	Variables map[string]string `json:"variables,omitempty" yaml:"variables,omitempty"`
 
-	// ProxyManaged absorbs the v1 `environment.proxyManaged` list.
-	// The normalize step folds each entry into the matching
-	// Credentials[].ApiKey.Name (by service lookup against
-	// LegacyNetwork.ServiceAuth) and emits a deprecation warning.
-	// Removed in the Phase 6 schema cutover.
+	// ProxyManaged is the in-container sentinel set: the names of the
+	// credentials whose apiKey is marked proxyManaged. It is DERIVED by
+	// normalize (deriveProxyManagedEnv) from Credentials[].ApiKey.ProxyManaged,
+	// not authored directly — the engine consumer reads this single source of
+	// truth. Any decoded value is overridden.
 	ProxyManaged []string `json:"-" yaml:"proxyManaged,omitempty"`
 }
 
 // SettingsPolicy defines container settings that control agent-specific
-// configuration file creation. As of Phase 4 it is no longer a canonical
-// Artifact surface — it survives only as the decode target for the
-// specFile.LegacySettings shim (the v1 `settings:` block), which
-// normalizeLegacySettings absorbs-and-drops with a deprecation warning.
-// Removed in the Phase 6 schema cutover.
+// configuration file creation. It is the v1 `settings:` block shape and is
+// not a canonical v2 Artifact surface (the per-kit container-settings behavior
+// was lifted into each kit's initFiles/commands.startup in Phase 4). The
+// production loader no longer decodes it; the type is retained for the
+// spec/v1migrate converter, which absorbs-and-drops the block.
 type SettingsPolicy struct {
 	// ContainerSettings controls which agent-container settings files are created.
 	ContainerSettings map[string]bool `json:"containerSettings,omitempty" yaml:"containerSettings,omitempty"`
@@ -644,10 +635,10 @@ type Artifact struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
-// OAuthPolicy is the v1 standalone top-level `oauth:` block shape. Kept
-// as a deserialization target for specFile.LegacyOAuth; normalize folds
-// it into Credentials[].OAuth with a deprecation warning. Removed in the
-// Phase 6 schema cutover.
+// OAuthPolicy is the v1 standalone top-level `oauth:` block shape. The
+// production loader is v2-only and no longer decodes it; the type is retained
+// for ValidateOAuthPolicy and the spec/v1migrate converter, which folds it
+// into Credentials[].OAuth.
 type OAuthPolicy struct {
 	Service             string               `json:"service" yaml:"service"`
 	TokenEndpoint       OAuthTokenEndpoint   `json:"tokenEndpoint" yaml:"tokenEndpoint"`
@@ -720,7 +711,8 @@ type OAuthSentinels struct {
 //     Go map before placeholder substitution. Preferred for new kits.
 //
 // When both are set, Structure wins and Template is ignored with a
-// deprecation warning. Phase 6 removes Template.
+// deprecation warning. Template remains accepted for now; its removal is
+// deferred to a future schema version.
 type OAuthCredentialFile struct {
 	Path      string                 `json:"path" yaml:"path"`
 	Template  string                 `json:"template,omitempty" yaml:"template,omitempty"`
@@ -764,10 +756,9 @@ func (p *OAuthPolicy) ResolvedResponseFields() OAuthResponseFields {
 // specFile is the on-disk YAML schema for spec.yaml.
 type specFile struct {
 	Manifest `yaml:",inline"`
-	// Volumes is the polymorphic-decode wrapper for the `volumes:` YAML
-	// key, handling both the v1 mapping shape and the v2 sequence shape.
-	// Manifest.Volumes carries `yaml:"-"` so this field owns the decode;
-	// normalize folds Volumes.List + Volumes.LegacyMap into the canonical
+	// Volumes is the decode wrapper for the `volumes:` YAML key (the v2
+	// sequence shape). Manifest.Volumes carries `yaml:"-"` so this field owns
+	// the decode; normalize folds Volumes.List into the canonical
 	// Manifest.Volumes slice.
 	Volumes  volumesField  `yaml:"volumes,omitempty"`
 	Extends  string        `yaml:"extends,omitempty"`
@@ -775,151 +766,56 @@ type specFile struct {
 	Locked   []string      `yaml:"locked,omitempty"`
 	Licenses []string      `yaml:"licenses,omitempty"`
 	Sandbox  *sandboxBlock `yaml:"sandbox,omitempty"`
-	// LegacyAgent holds the v1 `agent:` block. The normalize step
-	// migrates its contents to Sandbox with a deprecation warning. Drop
-	// in the Phase 6 schema-cutover commit.
-	LegacyAgent *sandboxBlock     `yaml:"agent,omitempty"`
-	Secrets     []string          `yaml:"secrets,omitempty"`
-	Egress      map[string]string `yaml:"egress,omitempty"`
-	// Credentials is the polymorphic-decode wrapper handling both v1
-	// (mapping with sources:) and v2 (sequence of Credential) shapes.
-	// normalizeLegacyCredentials folds the v1 surface plus the
-	// LegacyNetwork / LegacyOAuth / Environment.ProxyManaged
-	// shims into Artifact.Credentials.
+	// Credentials is the `credentials:` sequence of Credential entries.
 	Credentials credentialsField `yaml:"credentials,omitempty"`
-	// PublishedPorts is the v2 canonical top-level `publishedPorts:` list.
-	// Decoded directly from YAML; normalize also promotes the v1
-	// LegacyNetwork.PublishedPorts shim into this slice.
-	PublishedPorts []PublishedPort `yaml:"publishedPorts,omitempty"`
-	// LegacyNetwork absorbs the v1 top-level `network:` block. normalize
-	// folds its serviceDomains/serviceAuth fields into Credentials, its
-	// allowedDomains/deniedDomains into Caps.Network, and its publishedPorts
-	// into the top-level PublishedPorts. Removed in the Phase 6 schema cutover.
-	LegacyNetwork *NetworkPolicy     `yaml:"network,omitempty"`
-	Environment   *EnvironmentPolicy `yaml:"environment,omitempty"`
-	// LegacySettings absorbs the v1 `settings:` block. There is no v2 field
-	// to map it into — the container-settings behavior was lifted into each
-	// kit's initFiles/commands.startup (Phase 4) — so normalizeLegacySettings
-	// drops it with a deprecation warning. Kept only so KnownFields(true)
-	// strict decode still admits a stray `settings:` block instead of hard-
-	// rejecting it. Removed in the Phase 6 schema cutover.
-	LegacySettings *SettingsPolicy `yaml:"settings,omitempty"`
-	Commands       *CommandsPolicy `yaml:"commands,omitempty"`
+	// PublishedPorts is the canonical top-level `publishedPorts:` list.
+	PublishedPorts []PublishedPort    `yaml:"publishedPorts,omitempty"`
+	Environment    *EnvironmentPolicy `yaml:"environment,omitempty"`
+	Commands       *CommandsPolicy    `yaml:"commands,omitempty"`
 	// Caps is the v2 capabilities block (caps.network and any future
-	// caps.* surfaces). Decoded directly from YAML; the normalize step
-	// also populates Caps.Network from the v1 network.allowedDomains/
-	// deniedDomains shim (LegacyNetwork) when those are present.
-	Caps *Caps `yaml:"caps,omitempty"`
-	// LegacyOAuth absorbs the v1 standalone top-level `oauth:` block.
-	// normalize folds it into Credentials[].OAuth (matched by service)
-	// or synthesizes a new Credential entry if no entry exists for its
-	// service yet. Removed in the Phase 6 schema cutover.
-	LegacyOAuth  *OAuthPolicy `yaml:"oauth,omitempty"`
-	AgentContext string       `yaml:"agentContext,omitempty"`
-	// LegacyMemory holds the v1 `memory:` field. The normalize step
-	// migrates it to AgentContext with a deprecation warning. Drop in
-	// the Phase 6 schema-cutover commit.
-	LegacyMemory string `yaml:"memory,omitempty"`
-	// LegacyPersistence holds the v1 `persistence:` field. The field was
-	// declared, parsed, inherited, displayed, but never consumed by any
-	// runtime decision (see sandboxes commit 05e5b4eef adopting PR #37).
-	// It was removed from the canonical types in PR #37, but that same PR
-	// also flipped on strict YAML decoding — turning what had been a silent
-	// no-op into a hard error for any kit author whose spec still carried
-	// the line. The normalize step now drops it with a deprecation warning
-	// to give those kits one release to migrate. Drop in the Phase 6
-	// schema-cutover commit.
-	LegacyPersistence string `yaml:"persistence,omitempty"`
-	// LegacyKitDir holds the v1 `kitDir:` field. Same story as
-	// LegacyPersistence — declared but never consumed, removed in PR #37,
-	// re-admitted here as a deprecation-warning shim. Drop in the Phase 6
-	// schema-cutover commit.
-	LegacyKitDir string `yaml:"kitDir,omitempty"`
-	// LegacyTmpfs holds the v1 `tmpfs:` block as a mapping from container
-	// path to size string (e.g. `{ /tmp/scratch: "512m" }`). The v1 shape
-	// was first replaced by `Tmpfs []MountSpec` (PR #37) and then deleted
-	// entirely by PR #59 in favor of `volumes:` entries with `type: tmpfs`.
-	// The strict-decode flip turned a no-op into a hard rejection;
-	// normalize folds entries into Manifest.Volumes with Type=Tmpfs and
-	// emits a deprecation warning. Drop in the Phase 6 schema-cutover
-	// commit.
-	LegacyTmpfs map[string]string `yaml:"tmpfs,omitempty"`
+	// caps.* surfaces).
+	Caps         *Caps  `yaml:"caps,omitempty"`
+	AgentContext string `yaml:"agentContext,omitempty"`
 }
 
-// credentialsField is the specFile-level polymorphic wrapper for the
-// `credentials:` YAML key. It handles both v1 (mapping with sources:
-// inside) and v2 (sequence of Credential) shapes. The normalize step
-// reads LegacySources (if present) plus the Legacy fields under network:
-// and environment:, constructs []Credential, and stores into
-// Artifact.Credentials.
-//
-// Phase 1's two-yaml-tag pattern (used for memory/agentContext and
-// agent/sandbox) doesn't apply here because v1 and v2 share the same
-// `credentials:` YAML tag with different value kinds — only a custom
-// UnmarshalYAML can disambiguate.
+// credentialsField is the specFile-level decode wrapper for the
+// `credentials:` YAML key (a sequence of Credential). It exists as a custom
+// UnmarshalYAML so an explicit, actionable error is produced when the value
+// is not a sequence (e.g. the retired v1 mapping-with-sources: shape).
 type credentialsField struct {
-	// List is populated when credentials: is a sequence (v2 spelling).
+	// List is populated when credentials: is a sequence (the v2 shape).
 	List []Credential
-
-	// LegacySources is populated when credentials: is a mapping with
-	// sources: under it (v1 spelling). Each entry carries the env/file
-	// discovery hints the v1 shape used.
-	LegacySources map[string]CredentialSource
 }
 
 func (c *credentialsField) UnmarshalYAML(node *yaml.Node) error {
 	switch node.Kind {
 	case yaml.SequenceNode:
 		return node.Decode(&c.List)
-	case yaml.MappingNode:
-		var v1 struct {
-			Sources map[string]CredentialSource `yaml:"sources"`
-		}
-		if err := node.Decode(&v1); err != nil {
-			return err
-		}
-		c.LegacySources = v1.Sources
-		return nil
 	case 0:
 		return nil
 	default:
-		return fmt.Errorf("credentials: must be a list (v2) or a mapping with sources: (v1)")
+		return fmt.Errorf("credentials: must be a list of credential entries")
 	}
 }
 
-// volumesField is the specFile-level polymorphic wrapper for the `volumes:`
-// YAML key. PR #37 replaced the v1 mapping shape
-// (`volumes: { /path: "size" }`) with the v2 sequence shape
-// (`volumes: [{ path: /path, size: "100m" }]`), then flipped on strict
-// decoding in the same commit. Strict decode hard-fails the v1 mapping
-// shape with a type-mismatch error rather than a "field not found"; this
-// wrapper accepts both shapes and lets normalize fold the legacy form into
-// Manifest.Volumes with a deprecation warning.
+// volumesField is the specFile-level decode wrapper for the `volumes:` YAML
+// key (a sequence of MountSpec). Manifest.Volumes carries yaml:"-" so this
+// field owns the decode; normalize folds List into the canonical slice. The
+// custom UnmarshalYAML produces an actionable error when the value is not a
+// sequence (e.g. the retired v1 mapping shape).
 type volumesField struct {
-	// List is populated when volumes: is a sequence (v2 spelling).
+	// List is populated when volumes: is a sequence (the v2 shape).
 	List []MountSpec
-
-	// LegacyMap is populated when volumes: is a mapping (v1 spelling):
-	// each key is the container mount path, each value is a size string
-	// (or empty when the v1 spec carried no size).
-	LegacyMap map[string]string
 }
 
 func (v *volumesField) UnmarshalYAML(node *yaml.Node) error {
 	switch node.Kind {
 	case yaml.SequenceNode:
 		return node.Decode(&v.List)
-	case yaml.MappingNode:
-		var m map[string]string
-		if err := node.Decode(&m); err != nil {
-			return err
-		}
-		v.LegacyMap = m
-		return nil
 	case 0:
 		return nil
 	default:
-		return fmt.Errorf("volumes: must be a list (v2) or a mapping (v1)")
+		return fmt.Errorf("volumes: must be a list of mount entries")
 	}
 }
 
@@ -932,13 +828,6 @@ type sandboxBlock struct {
 	Entrypoint *entrypointBlock `yaml:"entrypoint,omitempty"`
 	AIFilename string           `yaml:"aiFilename,omitempty"`
 	Resources  *Resources       `yaml:"resources,omitempty"`
-	// LegacyPersistence holds the v1 `persistence:` field that lived inside
-	// the (then-)agent block. PR #37 deleted it (declared but never
-	// consumed) and flipped on strict decoding in the same commit, turning
-	// the silent no-op into a hard error for any kit that still had it.
-	// normalizeSandbox drops it with a deprecation warning. Drop in the
-	// Phase 6 schema-cutover commit alongside LegacyAgent.
-	LegacyPersistence string `yaml:"persistence,omitempty"`
 }
 
 // entrypointBlock describes the agent's process launch configuration.

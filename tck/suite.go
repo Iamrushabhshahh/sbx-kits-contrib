@@ -496,9 +496,9 @@ func (s *Suite) RunCommandsValidationTests(t *testing.T) {
 }
 
 // RunOAuthPolicyTests verifies the OAuth policy is well-formed for every
-// credential that declares an oauth: sub-block. Post-Phase-3 commit 5,
-// OAuth lives under Credential.OAuth (per-credential); the standalone
-// top-level oauth: block is the v1 LegacyOAuth shim handled at load time.
+// credential that declares an oauth: sub-block. OAuth lives under
+// Credential.OAuth (per-credential); the standalone top-level v1 oauth: block
+// was removed in the Phase 6 cutover (convert legacy specs with spec/v1migrate).
 func (s *Suite) RunOAuthPolicyTests(t *testing.T) {
 	for _, c := range s.Artifact.Credentials {
 		if c.OAuth == nil {

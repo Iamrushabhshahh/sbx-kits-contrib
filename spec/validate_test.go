@@ -17,14 +17,26 @@ func TestValidateManifest(t *testing.T) {
 		require.NoError(t, ValidateManifest(&valid))
 	})
 
-	t.Run("valid_agent", func(t *testing.T) {
+	t.Run("valid_sandbox", func(t *testing.T) {
+		m := Manifest{
+			SchemaVersion: SchemaVersion,
+			Kind:          KindSandbox,
+			Name:          "test-sandbox",
+			Template:      "docker/sandbox-templates:shell-docker",
+		}
+		require.NoError(t, ValidateManifest(&m))
+	})
+
+	t.Run("v1_kind_agent_rejected", func(t *testing.T) {
+		// The v1 `kind: agent` value is no longer accepted by the v2-only
+		// loader (it folds to sandbox via spec/v1migrate).
 		m := Manifest{
 			SchemaVersion: SchemaVersion,
 			Kind:          KindAgent,
 			Name:          "test-agent",
 			Template:      "docker/sandbox-templates:shell-docker",
 		}
-		require.NoError(t, ValidateManifest(&m))
+		require.ErrorContains(t, ValidateManifest(&m), "invalid kind")
 	})
 
 	t.Run("missing_schema_version", func(t *testing.T) {
@@ -33,18 +45,19 @@ func TestValidateManifest(t *testing.T) {
 		require.ErrorContains(t, ValidateManifest(&m), "schemaVersion")
 	})
 
-	t.Run("schema_version_1_accepted", func(t *testing.T) {
-		// "1" is the legacy schema version and must keep validating so
-		// existing kits in the wild continue to load after the bump.
+	t.Run("schema_version_1_rejected", func(t *testing.T) {
+		// v1 was dropped in the Phase 6 cutover; a `schemaVersion: "1"`
+		// spec must hard-fail (authors run spec/v1migrate to convert).
 		m := valid
 		m.SchemaVersion = "1"
-		require.NoError(t, ValidateManifest(&m))
+		err := ValidateManifest(&m)
+		require.ErrorContains(t, err, "unsupported schemaVersion")
+		require.ErrorContains(t, err, `"1"`)
 	})
 
 	t.Run("schema_version_2_accepted", func(t *testing.T) {
-		// "2" opts a kit into the v2 OCI distribution format at pack
-		// time. The spec library accepts it; downstream tooling reads
-		// the value to decide which OCI format to emit.
+		// "2" is the only accepted schema version. Downstream tooling
+		// reads the value to decide which OCI format to emit.
 		m := valid
 		m.SchemaVersion = "2"
 		require.NoError(t, ValidateManifest(&m))
@@ -85,11 +98,11 @@ func TestValidateManifest(t *testing.T) {
 		require.ErrorContains(t, ValidateManifest(&m), "invalid name")
 	})
 
-	t.Run("agent_missing_template", func(t *testing.T) {
+	t.Run("sandbox_missing_template", func(t *testing.T) {
 		m := Manifest{
 			SchemaVersion: SchemaVersion,
-			Kind:          KindAgent,
-			Name:          "test-agent",
+			Kind:          KindSandbox,
+			Name:          "test-sandbox",
 		}
 		require.ErrorContains(t, ValidateManifest(&m), "template is required")
 	})

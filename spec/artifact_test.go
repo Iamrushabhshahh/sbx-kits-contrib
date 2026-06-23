@@ -163,10 +163,9 @@ func TestParseArtifact_InvalidYAML(t *testing.T) {
 
 // TestParseArtifact_StrictUnknownField guards the strict-decode behaviour:
 // truly unknown top-level keys (and unknown nested keys under known blocks)
-// hard-fail rather than getting silently dropped. Fields that USED to be
-// valid pre-v2 but were retired — `persistence:`, `kitDir:` — are routed
-// through the LegacyXxx + normalize.go deprecation-warning path instead;
-// their behaviour is pinned by the tests in v1_compat_test.go.
+// hard-fail rather than getting silently dropped. The retired v1 fields
+// (`agent:`, `network:`, `persistence:`, `kitDir:`, …) are now unknown keys
+// too — a v1 spec is rejected here and must be converted with spec/v1migrate.
 func TestParseArtifact_StrictUnknownField(t *testing.T) {
 	t.Run("unknown_top_level_key_rejected", func(t *testing.T) {
 		dir := t.TempDir()
